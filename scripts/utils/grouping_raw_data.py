@@ -50,4 +50,3 @@ class BatchSplitter:
 
 if __name__ == '__main__':
     BatchSplitter.split_to_equal_files()
-    print('DODAC GITA !!!!!!!!')
