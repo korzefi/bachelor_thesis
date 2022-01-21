@@ -4,7 +4,7 @@
 # Press Double ⇧ to search everywhere for classes, files, tool windows, actions, and settings.
 
 
-analiza filogenetyczna
+# analiza filogenetyczna
 
 def print_hi(name):
     # Use a breakpoint in the code line below to debug your script.
