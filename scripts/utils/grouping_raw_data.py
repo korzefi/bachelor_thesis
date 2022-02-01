@@ -4,13 +4,14 @@ import shutil
 import pandas as pd
 
 from utils import get_root_path
+from itertools import cycle
 
 ROOT_PATH = get_root_path()
 DATA_PARENT_PATH = ROOT_PATH + '/data/covid-spike-GISAID/spikeprot0104.tar/spikeprot0104'
 DATA_RAW_FILE_NAME = 'spikeprot0104.fasta'
 SPLIT_FILES_DIR_NAME = 'split_data'
 FILES_NAME_CORE = 'spikeprot_batch_data'
-DIVISION_TECHNIQUE = 'year'
+DIVISION_TECHNIQUE = 'month'
 
 
 class DirHandler:
@@ -74,9 +75,9 @@ class DirHandler:
 
 
 class BatchSplitter:
-    lines_num_each_file = 1000
-    max_num_of_files = 10
-    start_line_idx = 100001
+    lines_num_each_file = 100
+    max_num_of_files = 3
+    start_line_idx = 1
 
     @staticmethod
     def split_to_equal_files():
@@ -197,6 +198,12 @@ class BatchCleaner:
 
 
 class PeriodSorter:
+    periods_in_year_beginning = {
+        'quarter': [['01-01', '03-31'], ['04-01', '06-31'], ['07-01', '09-30'], ['10-01', '12-31']],
+        'month': [['01-01', '01-31'], ['02-01', '02-28'], ['03-01', '03-31'], ['04-01', '04-30'],
+                  ['05-01', '05-31'], ['06-01', '06-30'], ['07-01', '07-31'], ['08-01', '08-31'],
+                  ['09-01', '09-30'], ['10-01', '10-31'], ['11-01', '11-30'], ['12-01', '12-31']]}
+
     @staticmethod
     def divide():
         files_paths = DirHandler.get_csv_files_paths()
@@ -225,13 +232,9 @@ class PeriodSorter:
     def __divide_by_year(df):
         header_flag = True
         root_path = DirHandler.get_periods_dir()
-        first_row = df.head(1)
-        last_row = df.tail(1)
-        first_date = pd.DataFrame(first_row['timestamp'].dt.year)
-        last_date = pd.DataFrame(last_row['timestamp'].dt.year)
-        first_date = first_date.iloc[0]['timestamp']
-        last_date = last_date.iloc[0]['timestamp']
-        years = range(first_date.astype(int), last_date.astype(int) + 1)
+        first_year = PeriodSorter.__get_first_year(df)
+        last_year = PeriodSorter.__get_last_year(df)
+        years = range(first_year, last_year + 1)
         for year in years:
             start = f'{year}-01-01'
             end = f'{year}-12-31'
@@ -243,11 +246,55 @@ class PeriodSorter:
 
     @staticmethod
     def __divide_by_quarter(df):
-        pass
+        header_flag = True
+        root_path = DirHandler.get_periods_dir()
+        first_year = PeriodSorter.__get_first_year(df)
+        last_year = PeriodSorter.__get_last_year(df)
+        years = range(first_year, last_year + 1)
+        for year in years:
+            count = 1
+            for quarter in PeriodSorter.periods_in_year_beginning['quarter']:
+                start = f'{year}-{quarter[0]}'
+                end = f'{year}-{quarter[1]}'
+                year_df = df[(df['timestamp'] >= start) & (df['timestamp'] <= end)]
+                output_path = f'{root_path}/{year}-q{str(count)}.csv'
+                if os.path.exists(output_path):
+                    header_flag = False
+                year_df.to_csv(output_path, index=False, mode='a', header=header_flag)
+                count += 3
 
     @staticmethod
     def __divide_by_month(df):
-        pass
+        header_flag = True
+        root_path = DirHandler.get_periods_dir()
+        first_year = PeriodSorter.__get_first_year(df)
+        last_year = PeriodSorter.__get_last_year(df)
+        years = range(first_year, last_year + 1)
+        for year in years:
+            count = 1
+            for month in PeriodSorter.periods_in_year_beginning['month']:
+                start = f'{year}-{month[0]}'
+                end = f'{year}-{month[1]}'
+                year_df = df[(df['timestamp'] >= start) & (df['timestamp'] <= end)]
+                output_path = f'{root_path}/{year}-{str(count)}.csv'
+                if os.path.exists(output_path):
+                    header_flag = False
+                year_df.to_csv(output_path, index=False, mode='a', header=header_flag)
+                count += 1
+
+    @staticmethod
+    def __get_first_year(df):
+        first_row = df.head(1)
+        first_date = pd.DataFrame(first_row['timestamp'].dt.year)
+        first_date = first_date.iloc[0]['timestamp']
+        return first_date.astype(int)
+
+    @staticmethod
+    def __get_last_year(df):
+        last_row = df.tail(1)
+        last_date = pd.DataFrame(last_row['timestamp'].dt.year)
+        last_date = last_date.iloc[0]['timestamp']
+        return last_date.astype(int)
 
 
 if __name__ == '__main__':
