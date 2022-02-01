@@ -19,16 +19,14 @@ class DirHandler:
     temporary_csv_dir_name = 'temp_csv'
     period_root_dir_name = 'periods'
     files_name_core = 'spikeprot_batch_data'
-    first_year_dir = '2019'
-    last_year_dir = '2022'
 
     @staticmethod
     def create_dirs():
         split_data_root_dir = DirHandler.__get_split_data_root_path()
         temporary_fasta_dir = DirHandler.get_temp_fasta_dir_path()
         temporary_csv_dir = DirHandler.get_temp_csv_dir_path()
-        periods_dirs = DirHandler.get_period_dirs()
-        dir_paths = [split_data_root_dir, temporary_fasta_dir, temporary_csv_dir] + periods_dirs
+        periods_dir = DirHandler.get_periods_dir()
+        dir_paths = [split_data_root_dir, temporary_fasta_dir, temporary_csv_dir, periods_dir]
         for path in dir_paths:
             DirHandler.__create_dir(path)
 
@@ -71,44 +69,19 @@ class DirHandler:
         return list(map(lambda x: csv_dir_path + '/' + x + '.csv', files_names))
 
     @staticmethod
-    def get_period_dirs():
-        root_dir = DirHandler.get_period_root_dir()
-        periods = [f'{root_dir}/{str(year)}' for year in range(int(DirHandler.first_year_dir), int(DirHandler.last_year_dir)+1)]
-        if DIVISION_TECHNIQUE == 'month':
-            periods = DirHandler.__add_months(periods)
-            return periods
-        if DIVISION_TECHNIQUE == 'quarter':
-            periods = DirHandler.__add_quarters(periods)
-            return periods
-        return periods
-
-    @staticmethod
-    def get_period_root_dir():
+    def get_periods_dir():
         return f'{DirHandler.__get_split_data_root_path()}/{DirHandler.period_root_dir_name}'
-
-    @staticmethod
-    def __add_months(period_years):
-        months = range(1, 12+1)
-        months = map(lambda x: str(x), months)
-        return [f'{year}/{month}' for month in months for year in period_years]
-
-    @staticmethod
-    def __add_quarters(period_years):
-        quarters = range(1, 4 + 1)
-        quarters = map(lambda x: str(x), quarters)
-        return [f'{year}/{quarter}' for quarter in quarters for year in period_years]
-
 
 
 class BatchSplitter:
-    lines_num_each_file = 100
-    max_num_of_files = 3
-    start_line_idx = 1
+    lines_num_each_file = 1000
+    max_num_of_files = 10
+    start_line_idx = 100001
 
     @staticmethod
     def split_to_equal_files():
         max_num_iters = BatchSplitter.__get_iterations_num()
-        end_line_idx = BatchSplitter.lines_num_each_file
+        end_line_idx = BatchSplitter.start_line_idx + BatchSplitter.lines_num_each_file
         filepath_with_name_core = DirHandler.get_temp_fasta_dir_path() + '/' + FILES_NAME_CORE
         raw_data_filepath = DATA_PARENT_PATH + '/' + DATA_RAW_FILE_NAME
 
@@ -212,6 +185,16 @@ class BatchCleaner:
         df.drop_duplicates(subset=['isolate_name'], inplace=True)
         return df
 
+    @staticmethod
+    def remove_duplicates_periods():
+        path = DirHandler.get_periods_dir()
+        file_names = os.listdir(path)
+        files = list(map(lambda file_name: f'{path}/{file_name}', file_names))
+        for file in files:
+            df = pd.read_csv(file)
+            df.drop_duplicates(subset=['isolate_name'], inplace=True)
+            df.to_csv(file, index=False)
+
 
 class PeriodSorter:
     @staticmethod
@@ -219,9 +202,9 @@ class PeriodSorter:
         files_paths = DirHandler.get_csv_files_paths()
         for file in files_paths:
             df = pd.read_csv(file)
-            PeriodSorter.__sort(df)
-            df.to_csv(file, index=False)
+            df = PeriodSorter.__sort(df)
             PeriodSorter.__divide(df)
+            df.to_csv(file, index=False)
 
     @staticmethod
     def __sort(df):
@@ -240,7 +223,23 @@ class PeriodSorter:
 
     @staticmethod
     def __divide_by_year(df):
-        pass
+        header_flag = True
+        root_path = DirHandler.get_periods_dir()
+        first_row = df.head(1)
+        last_row = df.tail(1)
+        first_date = pd.DataFrame(first_row['timestamp'].dt.year)
+        last_date = pd.DataFrame(last_row['timestamp'].dt.year)
+        first_date = first_date.iloc[0]['timestamp']
+        last_date = last_date.iloc[0]['timestamp']
+        years = range(first_date.astype(int), last_date.astype(int) + 1)
+        for year in years:
+            start = f'{year}-01-01'
+            end = f'{year}-12-31'
+            year_df = df[(df['timestamp'] >= start) & (df['timestamp'] <= end)]
+            output_path = f'{root_path}/{year}.csv'
+            if os.path.exists(output_path):
+                header_flag = False
+            year_df.to_csv(output_path, index=False, mode='a', header=header_flag)
 
     @staticmethod
     def __divide_by_quarter(df):
@@ -253,8 +252,10 @@ class PeriodSorter:
 
 if __name__ == '__main__':
     DirHandler.create_dirs()
-    # BatchSplitter.split_to_equal_files()
-    # CsvTransformer.transform_files()
-    # DirHandler.delete_temp_fasta()
-    # BatchCleaner.clean()
-    # PeriodSorter.divide()
+    BatchSplitter.split_to_equal_files()
+    CsvTransformer.transform_files()
+    DirHandler.delete_temp_fasta()
+    BatchCleaner.clean()
+    PeriodSorter.divide()
+    DirHandler.delete_temp_csv()
+    BatchCleaner.remove_duplicates_periods()
