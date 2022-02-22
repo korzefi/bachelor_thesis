@@ -3,14 +3,7 @@ import subprocess
 import shutil
 import pandas as pd
 
-from utils import get_root_path
-
-ROOT_PATH = get_root_path()
-DATA_PARENT_PATH = ROOT_PATH + '/data/covid-spike-GISAID/spikeprot0104.tar/spikeprot0104'
-DATA_RAW_FILE_NAME = 'spikeprot0104.fasta'
-SPLIT_FILES_DIR_NAME = 'split_data'
-FILES_NAME_CORE = 'spikeprot_batch_data'
-DIVISION_TECHNIQUE = 'year'
+from config import GroupingRawData as cfg
 
 
 class DirHandler:
@@ -31,7 +24,7 @@ class DirHandler:
 
     @staticmethod
     def __get_split_data_root_path():
-        return f'{DATA_PARENT_PATH}/{SPLIT_FILES_DIR_NAME}'
+        return f'{cfg.DATA_PARENT_PATH}/{cfg.SPLIT_FILES_DIR_NAME}'
 
     @staticmethod
     def get_temp_fasta_dir_path():
@@ -64,12 +57,12 @@ class DirHandler:
     @staticmethod
     def get_csv_files_paths():
         csv_dir_path = DirHandler.get_temp_csv_dir_path()
-        files_names = DirHandler.get_files_names(csv_dir_path, extension='.csv')
+        files_names = DirHandler.get_files_names(csv_dir_path, extension='csv')
         return list(map(lambda x: csv_dir_path + '/' + x + '.csv', files_names))
 
     @staticmethod
     def get_periods_dir():
-        return f'{DirHandler.__get_split_data_root_path()}/{DirHandler.period_root_dir_name}'
+        return f'{DirHandler.__get_split_data_root_path()}/{cfg.PERIOD_ROOT_DIR_NAME}'
 
 
 class BatchSplitter:
@@ -84,8 +77,8 @@ class BatchSplitter:
         start_line_idx = BatchSplitter.start_line_idx
         left_lines = lines_num - (start_line_idx - 1)
         end_line_idx = BatchSplitter.start_line_idx + min(BatchSplitter.lines_num_each_file, left_lines)
-        filepath_with_name_core = DirHandler.get_temp_fasta_dir_path() + '/' + FILES_NAME_CORE
-        raw_data_filepath = DATA_PARENT_PATH + '/' + DATA_RAW_FILE_NAME
+        filepath_with_name_core = DirHandler.get_temp_fasta_dir_path() + '/' + cfg.FILES_NAME_CORE
+        raw_data_filepath = cfg.DATA_PARENT_PATH + '/' + cfg.DATA_RAW_FILE_NAME
 
         for i in range(max_num_iters):
             copy_command = ['cat', raw_data_filepath, '|', 'sed', '-n',
@@ -103,7 +96,7 @@ class BatchSplitter:
 
     @staticmethod
     def __get_num_of_lines():
-        raw_data_filepath = DATA_PARENT_PATH + '/' + DATA_RAW_FILE_NAME
+        raw_data_filepath = cfg.DATA_PARENT_PATH + '/' + cfg.DATA_RAW_FILE_NAME
         num_lines_command = f'wc -l {raw_data_filepath}'
         output = subprocess.check_output(num_lines_command, shell=True, encoding='UTF-8')
         output = output.split()
@@ -228,7 +221,7 @@ class PeriodSorter:
         types = {'year': PeriodSorter.__divide_by_year,
                  'quarter': PeriodSorter.__divide_by_quarter,
                  'month': PeriodSorter.__divide_by_month}
-        types[DIVISION_TECHNIQUE](df)
+        types[cfg.DIVISION_TECHNIQUE](df)
 
     @staticmethod
     def __divide_by_year(df):
@@ -297,7 +290,7 @@ class PeriodSorter:
         return not os.path.exists(output_path)
 
 
-if __name__ == '__main__':
+def prepare_files():
     DirHandler.create_dirs()
     BatchSplitter.split_to_equal_files()
     CsvTransformer.transform_files()
@@ -306,3 +299,12 @@ if __name__ == '__main__':
     PeriodSorter.divide()
     DirHandler.delete_temp_csv()
     BatchCleaner.remove_duplicates_periods()
+
+
+if __name__ == '__main__':
+    # TODO: alignment to be checked - what the hell is going on with those gaps - why there is more positions then whole sequence (seq=1273 and after alignment it's 1300+)
+    #  how to find out which positions is which then???
+    #  strategies:
+    #  1) leave only those sequences that are 1273 len before being aligned and check whether after alignment there are sequences 1273 long (counting without gaps)
+    #  2) focus only on important positions (epitopes ones) and if the gap does not occur then it is not important if it's shorter
+    prepare_files()
