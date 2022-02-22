@@ -4,18 +4,16 @@ import shutil
 import pandas as pd
 
 from utils import get_root_path
-from itertools import cycle
 
 ROOT_PATH = get_root_path()
 DATA_PARENT_PATH = ROOT_PATH + '/data/covid-spike-GISAID/spikeprot0104.tar/spikeprot0104'
 DATA_RAW_FILE_NAME = 'spikeprot0104.fasta'
 SPLIT_FILES_DIR_NAME = 'split_data'
 FILES_NAME_CORE = 'spikeprot_batch_data'
-DIVISION_TECHNIQUE = 'month'
+DIVISION_TECHNIQUE = 'year'
 
 
 class DirHandler:
-    split_files_dir_name = 'split_data'
     temporary_fasta_dir_name = 'temp_fasta'
     temporary_csv_dir_name = 'temp_csv'
     period_root_dir_name = 'periods'
@@ -33,7 +31,7 @@ class DirHandler:
 
     @staticmethod
     def __get_split_data_root_path():
-        return f'{DATA_PARENT_PATH}/{DirHandler.split_files_dir_name}'
+        return f'{DATA_PARENT_PATH}/{SPLIT_FILES_DIR_NAME}'
 
     @staticmethod
     def get_temp_fasta_dir_path():
@@ -75,30 +73,33 @@ class DirHandler:
 
 
 class BatchSplitter:
-    lines_num_each_file = 100
-    max_num_of_files = 3
-    start_line_idx = 1
+    lines_num_each_file = 1000
+    max_num_of_files = 1
+    start_line_idx = 5000001
 
     @staticmethod
     def split_to_equal_files():
-        max_num_iters = BatchSplitter.__get_iterations_num()
-        end_line_idx = BatchSplitter.start_line_idx + BatchSplitter.lines_num_each_file
+        lines_num = int(BatchSplitter.__get_num_of_lines())
+        max_num_iters = BatchSplitter.__get_iterations_num(lines_num)
+        start_line_idx = BatchSplitter.start_line_idx
+        left_lines = lines_num - (start_line_idx - 1)
+        end_line_idx = BatchSplitter.start_line_idx + min(BatchSplitter.lines_num_each_file, left_lines)
         filepath_with_name_core = DirHandler.get_temp_fasta_dir_path() + '/' + FILES_NAME_CORE
         raw_data_filepath = DATA_PARENT_PATH + '/' + DATA_RAW_FILE_NAME
 
         for i in range(max_num_iters):
             copy_command = ['cat', raw_data_filepath, '|', 'sed', '-n',
                             f'{BatchSplitter.start_line_idx},{end_line_idx}p', '>>',
-                            f"{filepath_with_name_core}-{BatchSplitter.start_line_idx}-{end_line_idx}.fasta"]
+                            f"{filepath_with_name_core}-{start_line_idx}-{end_line_idx}.fasta"]
             os.system(' '.join(copy_command))
-            BatchSplitter.start_line_idx += BatchSplitter.lines_num_each_file
-            end_line_idx += BatchSplitter.lines_num_each_file
+            start_line_idx += BatchSplitter.lines_num_each_file
+            left_lines = lines_num - (start_line_idx - 1)
+            end_line_idx = BatchSplitter.start_line_idx + min(BatchSplitter.lines_num_each_file, left_lines)
 
     @staticmethod
-    def __get_iterations_num():
-        lines_num = int(BatchSplitter.__get_num_of_lines())
-        max_num_of_batches = lines_num // BatchSplitter.lines_num_each_file
-        return min(BatchSplitter.max_num_of_files, max_num_of_batches)
+    def __get_iterations_num(lines_num):
+        max_num_of_batches = (lines_num - BatchSplitter.start_line_idx + 1) // BatchSplitter.lines_num_each_file
+        return min(BatchSplitter.max_num_of_files, max_num_of_batches + 1)
 
     @staticmethod
     def __get_num_of_lines():
@@ -139,6 +140,7 @@ class CsvTransformer:
 
 class BatchCleaner:
     min_len = 1260
+    max_len = 1275
 
     @staticmethod
     def clean():
@@ -146,7 +148,7 @@ class BatchCleaner:
         for file in files_paths:
             df = pd.read_csv(file)
             df = BatchCleaner.__remove_ambiguous(df)
-            df = BatchCleaner.__remove_short(df)
+            df = BatchCleaner.__remove_wrong_len(df)
             df = BatchCleaner.__filter_description(df)
             df = BatchCleaner.__remove_duplicates(df)
             df.to_csv(file, index=False)
@@ -159,10 +161,10 @@ class BatchCleaner:
         return df
 
     @staticmethod
-    def __remove_short(df):
+    def __remove_wrong_len(df):
         end_sign = '*'
         df = df[df['sequence'].str.endswith(end_sign)]
-        df = df[df['sequence'].str.len() > BatchCleaner.min_len]
+        df = df[(df['sequence'].str.len() >= BatchCleaner.min_len) & (df['sequence'].str.len() <= BatchCleaner.max_len)]
         return df
 
     @staticmethod
@@ -230,7 +232,6 @@ class PeriodSorter:
 
     @staticmethod
     def __divide_by_year(df):
-        header_flag = True
         root_path = DirHandler.get_periods_dir()
         first_year = PeriodSorter.__get_first_year(df)
         last_year = PeriodSorter.__get_last_year(df)
@@ -240,13 +241,11 @@ class PeriodSorter:
             end = f'{year}-12-31'
             year_df = df[(df['timestamp'] >= start) & (df['timestamp'] <= end)]
             output_path = f'{root_path}/{year}.csv'
-            if os.path.exists(output_path):
-                header_flag = False
+            header_flag = PeriodSorter.__should_header_be_added(output_path)
             year_df.to_csv(output_path, index=False, mode='a', header=header_flag)
 
     @staticmethod
     def __divide_by_quarter(df):
-        header_flag = True
         root_path = DirHandler.get_periods_dir()
         first_year = PeriodSorter.__get_first_year(df)
         last_year = PeriodSorter.__get_last_year(df)
@@ -258,14 +257,12 @@ class PeriodSorter:
                 end = f'{year}-{quarter[1]}'
                 year_df = df[(df['timestamp'] >= start) & (df['timestamp'] <= end)]
                 output_path = f'{root_path}/{year}-q{str(count)}.csv'
-                if os.path.exists(output_path):
-                    header_flag = False
+                header_flag = PeriodSorter.__should_header_be_added(output_path)
                 year_df.to_csv(output_path, index=False, mode='a', header=header_flag)
                 count += 3
 
     @staticmethod
     def __divide_by_month(df):
-        header_flag = True
         root_path = DirHandler.get_periods_dir()
         first_year = PeriodSorter.__get_first_year(df)
         last_year = PeriodSorter.__get_last_year(df)
@@ -277,8 +274,7 @@ class PeriodSorter:
                 end = f'{year}-{month[1]}'
                 year_df = df[(df['timestamp'] >= start) & (df['timestamp'] <= end)]
                 output_path = f'{root_path}/{year}-{str(count)}.csv'
-                if os.path.exists(output_path):
-                    header_flag = False
+                header_flag = PeriodSorter.__should_header_be_added(output_path)
                 year_df.to_csv(output_path, index=False, mode='a', header=header_flag)
                 count += 1
 
@@ -295,6 +291,10 @@ class PeriodSorter:
         last_date = pd.DataFrame(last_row['timestamp'].dt.year)
         last_date = last_date.iloc[0]['timestamp']
         return last_date.astype(int)
+
+    @staticmethod
+    def __should_header_be_added(output_path):
+        return not os.path.exists(output_path)
 
 
 if __name__ == '__main__':
