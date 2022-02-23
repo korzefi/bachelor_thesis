@@ -56,6 +56,7 @@ class DirHandler:
     @staticmethod
     def get_files_names(dir_path, extension):
         file_names = os.listdir(dir_path)
+        file_names.sort()
         return list(map(lambda x: x.rstrip('.' + extension), file_names))
 
     @staticmethod
@@ -200,6 +201,7 @@ class BatchCleaner:
         logging.info('Removing duplicated periods')
         path = DirHandler.get_periods_dir()
         file_names = os.listdir(path)
+        file_names.sort()
         files = list(map(lambda file_name: f'{path}/{file_name}', file_names))
         for file in files:
             df = pd.read_csv(file)
@@ -212,6 +214,7 @@ class BatchCleaner:
         logging.info('Removing empty periods dirs')
         path = DirHandler.get_periods_dir()
         file_names = os.listdir(path)
+        file_names.sort()
         files = list(map(lambda file_name: f'{path}/{file_name}', file_names))
         for file in files:
             df = pd.read_csv(file)
@@ -344,12 +347,6 @@ if __name__ == '__main__':
     #  strategies:
     #  1) leave only those sequences that are 1273 len before being aligned and check whether after alignment there are sequences 1273 long (counting without gaps)
     #  2) focus only on important positions (epitopes ones) and if the gap does not occur then it is not important if it's shorter
-    # prepare_files()
+    prepare_files()
     logging.info("Done")
 
-    files = os.listdir(f'{cfg.DATA_PARENT_PATH}/{cfg.SPLIT_FILES_DIR_NAME}/{cfg.PERIOD_ROOT_DIR_NAME}')
-    files.sort()
-    for file in files:
-        file_path = f'{cfg.DATA_PARENT_PATH}/{cfg.SPLIT_FILES_DIR_NAME}/{cfg.PERIOD_ROOT_DIR_NAME}/{file}'
-        df = pd.read_csv(file_path)
-        print(file, df.shape[0], sep=': ')
