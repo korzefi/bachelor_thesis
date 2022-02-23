@@ -15,4 +15,5 @@ class GroupingRawData:
 class Clustering:
     SPLIT_FILES_DIR_NAME = 'split_data'
     DATA_PERIODS_PATH = f'{GroupingRawData.DATA_PARENT_PATH}/{GroupingRawData.SPLIT_FILES_DIR_NAME}/periods'
+    PROT_VEC_PATH = ROOT_PATH + '/data/covid-spike-GISAID/spikeprot0104.tar/spikeprot0104/protVec_100d_3grams.csv'
 

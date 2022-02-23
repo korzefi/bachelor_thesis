@@ -69,6 +69,13 @@ class DirHandler:
     def get_periods_dir():
         return f'{DirHandler.__get_split_data_root_path()}/{cfg.PERIOD_ROOT_DIR_NAME}'
 
+    @staticmethod
+    def get_periods_file_names():
+        path = DirHandler.get_periods_dir()
+        file_names = os.listdir(path)
+        file_names.sort()
+        return list(map(lambda file_name: f'{path}/{file_name}', file_names))
+
 
 class BatchSplitter:
     lines_num_each_file = 100000
@@ -212,15 +219,17 @@ class BatchCleaner:
     @staticmethod
     def remove_empty_periods_dir():
         logging.info('Removing empty periods dirs')
-        path = DirHandler.get_periods_dir()
-        file_names = os.listdir(path)
-        file_names.sort()
-        files = list(map(lambda file_name: f'{path}/{file_name}', file_names))
+        files = DirHandler.get_periods_file_names()
         for file in files:
             df = pd.read_csv(file)
-            if df.shape[0] == 0:
-                os.remove(file)
-                logging.info(f'removed: {file.split("/")[-1]}')
+            rows_num = df.shape[0]
+            BatchCleaner.__remove_file_if_empty(file, rows_num)
+
+    @staticmethod
+    def __remove_file_if_empty(file, rows_num):
+        if rows_num == 0:
+            os.remove(file)
+            logging.info(f'removed: {file.split("/")[-1]}')
 
 
 class PeriodSorter:
@@ -341,12 +350,8 @@ def prepare_files():
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-
-    # TODO: alignment to be checked - what the hell is going on with those gaps - why there is more positions then whole sequence (seq=1273 and after alignment it's 1300+)
-    #  how to find out which positions is which then???
-    #  strategies:
-    #  1) leave only those sequences that are 1273 len before being aligned and check whether after alignment there are sequences 1273 long (counting without gaps)
-    #  2) focus only on important positions (epitopes ones) and if the gap does not occur then it is not important if it's shorter
+    # TODO: think about sequences that are not exactly 1273 long
+    #       think about clays of sequnces (where there is some info about the clay)
     prepare_files()
     logging.info("Done")
 
