@@ -2,6 +2,7 @@ import os
 import subprocess
 import shutil
 import pandas as pd
+import logging
 
 from config import GroupingRawData as cfg
 
@@ -14,6 +15,7 @@ class DirHandler:
 
     @staticmethod
     def create_dirs():
+        logging.info("Creating dirs")
         split_data_root_dir = DirHandler.__get_split_data_root_path()
         temporary_fasta_dir = DirHandler.get_temp_fasta_dir_path()
         temporary_csv_dir = DirHandler.get_temp_csv_dir_path()
@@ -39,14 +41,16 @@ class DirHandler:
         try:
             os.makedirs(path)
         except FileExistsError:
-            print(f'{path} already exists')
+            logging.warning(f'{path} already exists')
 
     @staticmethod
     def delete_temp_fasta():
+        logging.info('Removing dir with generated .fasta files')
         shutil.rmtree(DirHandler.get_temp_fasta_dir_path(), ignore_errors=True)
 
     @staticmethod
     def delete_temp_csv():
+        logging.info('Removing dir with generated .csv files')
         shutil.rmtree(DirHandler.get_temp_csv_dir_path(), ignore_errors=True)
 
     @staticmethod
@@ -66,28 +70,32 @@ class DirHandler:
 
 
 class BatchSplitter:
-    lines_num_each_file = 1000
-    max_num_of_files = 1
-    start_line_idx = 5000001
+    lines_num_each_file = 100000
+    max_num_of_files = 20
+    start_line_idx = 13_000_001
 
     @staticmethod
     def split_to_equal_files():
+        logging.info("Splitting .fasta files")
         lines_num = int(BatchSplitter.__get_num_of_lines())
         max_num_iters = BatchSplitter.__get_iterations_num(lines_num)
         start_line_idx = BatchSplitter.start_line_idx
         left_lines = lines_num - (start_line_idx - 1)
-        end_line_idx = BatchSplitter.start_line_idx + min(BatchSplitter.lines_num_each_file, left_lines)
+        end_line_idx = start_line_idx + min(BatchSplitter.lines_num_each_file, left_lines)
         filepath_with_name_core = DirHandler.get_temp_fasta_dir_path() + '/' + cfg.FILES_NAME_CORE
         raw_data_filepath = cfg.DATA_PARENT_PATH + '/' + cfg.DATA_RAW_FILE_NAME
 
         for i in range(max_num_iters):
+            logging.info(f'iteration {i+1} out of {max_num_iters}')
+            logging.info(f'lines {start_line_idx} to {end_line_idx}')
             copy_command = ['cat', raw_data_filepath, '|', 'sed', '-n',
-                            f'{BatchSplitter.start_line_idx},{end_line_idx}p', '>>',
+                            f'{start_line_idx},{end_line_idx}p', '>>',
                             f"{filepath_with_name_core}-{start_line_idx}-{end_line_idx}.fasta"]
             os.system(' '.join(copy_command))
             start_line_idx += BatchSplitter.lines_num_each_file
             left_lines = lines_num - (start_line_idx - 1)
-            end_line_idx = BatchSplitter.start_line_idx + min(BatchSplitter.lines_num_each_file, left_lines)
+            end_line_idx = start_line_idx + min(BatchSplitter.lines_num_each_file, left_lines)
+        logging.info(f'Finished at {end_line_idx} line')
 
     @staticmethod
     def __get_iterations_num(lines_num):
@@ -106,6 +114,7 @@ class BatchSplitter:
 class CsvTransformer:
     @staticmethod
     def transform_files():
+        logging.info('Transforming .fasta to .csv')
         fasta_files_dir = DirHandler.get_temp_fasta_dir_path()
         files_names = DirHandler.get_files_names(dir_path=fasta_files_dir, extension='fasta')
         csv_files_dir = DirHandler.get_temp_csv_dir_path()
@@ -133,12 +142,17 @@ class CsvTransformer:
 
 class BatchCleaner:
     min_len = 1260
-    max_len = 1275
+    max_len = 1280
 
     @staticmethod
     def clean():
+        logging.info('Cleaning csv files')
         files_paths = DirHandler.get_csv_files_paths()
+        counter = 0
+        files_num = len(files_paths)
         for file in files_paths:
+            counter += 1
+            logging.info(f'file {counter} out of {files_num}')
             df = pd.read_csv(file)
             df = BatchCleaner.__remove_ambiguous(df)
             df = BatchCleaner.__remove_wrong_len(df)
@@ -183,6 +197,7 @@ class BatchCleaner:
 
     @staticmethod
     def remove_duplicates_periods():
+        logging.info('Removing duplicated periods')
         path = DirHandler.get_periods_dir()
         file_names = os.listdir(path)
         files = list(map(lambda file_name: f'{path}/{file_name}', file_names))
@@ -190,6 +205,19 @@ class BatchCleaner:
             df = pd.read_csv(file)
             df.drop_duplicates(subset=['isolate_name'], inplace=True)
             df.to_csv(file, index=False)
+            logging.info(f'removed duplicates from {file.split("/")[-1]}')
+
+    @staticmethod
+    def remove_empty_periods_dir():
+        logging.info('Removing empty periods dirs')
+        path = DirHandler.get_periods_dir()
+        file_names = os.listdir(path)
+        files = list(map(lambda file_name: f'{path}/{file_name}', file_names))
+        for file in files:
+            df = pd.read_csv(file)
+            if df.shape[0] == 0:
+                os.remove(file)
+                logging.info(f'removed: {file.split("/")[-1]}')
 
 
 class PeriodSorter:
@@ -201,8 +229,14 @@ class PeriodSorter:
 
     @staticmethod
     def divide():
+        logging.info('Dividing among periods')
+        logging.info(f'Dividing strategy: {cfg.DIVISION_TECHNIQUE}')
         files_paths = DirHandler.get_csv_files_paths()
+        counter = 0
+        files_num = len(files_paths)
         for file in files_paths:
+            counter += 1
+            logging.info(f'file {counter} out of {files_num}')
             df = pd.read_csv(file)
             df = PeriodSorter.__sort(df)
             PeriodSorter.__divide(df)
@@ -299,12 +333,23 @@ def prepare_files():
     PeriodSorter.divide()
     DirHandler.delete_temp_csv()
     BatchCleaner.remove_duplicates_periods()
+    BatchCleaner.remove_empty_periods_dir()
 
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+
     # TODO: alignment to be checked - what the hell is going on with those gaps - why there is more positions then whole sequence (seq=1273 and after alignment it's 1300+)
     #  how to find out which positions is which then???
     #  strategies:
     #  1) leave only those sequences that are 1273 len before being aligned and check whether after alignment there are sequences 1273 long (counting without gaps)
     #  2) focus only on important positions (epitopes ones) and if the gap does not occur then it is not important if it's shorter
-    prepare_files()
+    # prepare_files()
+    logging.info("Done")
+
+    files = os.listdir(f'{cfg.DATA_PARENT_PATH}/{cfg.SPLIT_FILES_DIR_NAME}/{cfg.PERIOD_ROOT_DIR_NAME}')
+    files.sort()
+    for file in files:
+        file_path = f'{cfg.DATA_PARENT_PATH}/{cfg.SPLIT_FILES_DIR_NAME}/{cfg.PERIOD_ROOT_DIR_NAME}/{file}'
+        df = pd.read_csv(file_path)
+        print(file, df.shape[0], sep=': ')

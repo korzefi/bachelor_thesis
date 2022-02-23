@@ -8,7 +8,7 @@ class GroupingRawData:
     DATA_RAW_FILE_NAME = 'spikeprot0104.fasta'
     SPLIT_FILES_DIR_NAME = 'split_data'
     FILES_NAME_CORE = 'spikeprot_batch_data'
-    DIVISION_TECHNIQUE = 'year'
+    DIVISION_TECHNIQUE = 'month'
     PERIOD_ROOT_DIR_NAME = 'periods'
 
 
