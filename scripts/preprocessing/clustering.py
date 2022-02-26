@@ -50,23 +50,35 @@ class TripletMaker:
 
 class VectorTransformer:
     @staticmethod
-    def transform(file_triplets: [[]], prot_vec: pd.DataFrame) -> [[]]:
+    def transform(file_triplets: [[]], prot_vec: pd.DataFrame) -> pd.DataFrame:
         """takes list of sequences of triplets
             returns list of sequences, where each sequence is a vector of 100-dim"""
-        result = []
+        result = VectorTransformer.__create_df_template(prot_vec)
+        result.drop('words', inplace=True, axis=1)
+        sequence_counter = 0
         for sequence in file_triplets:
-            seq_result = prot_vec.drop(prot_vec.index, inplace=False)
+            sequence_counter += 1
+            logging.info(f'sequence {sequence_counter} of {len(file_triplets)} is being transformed...')
+            seq_result = VectorTransformer.__create_df_template(prot_vec)
             for triplet in sequence:
                 found = prot_vec.loc[prot_vec['words'] == triplet]
                 seq_result = pd.concat([seq_result, found])
             seq_vector = VectorTransformer.__add_embedded_vectors(seq_result)
-            result.append(seq_vector)
+            result = pd.concat([result, seq_vector], ignore_index=True)
         return result
 
     @staticmethod
-    def __add_embedded_vectors(vectors_list: [[]]):
-        vectors_list.drop('words', inplace=True, axis=1)
-        return [sum(x) for x in zip(vectors_list)]
+    def __add_embedded_vectors(seq_vectors: pd.DataFrame) -> pd.DataFrame:
+        seq_vectors.drop('words', inplace=True, axis=1)
+        seq_vectors.reset_index(drop=True, inplace=True)
+        result = pd.DataFrame()
+        for column in seq_vectors:
+            result.loc[1, column] = seq_vectors[column].sum()
+        return result
+
+    @staticmethod
+    def __create_df_template(df: pd.DataFrame):
+        return df.drop(df.index, inplace=False)
 
 
 if __name__ == '__main__':

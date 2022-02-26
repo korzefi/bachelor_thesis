@@ -24,3 +24,9 @@ Then for each sequence in those clusters, data is constructed (window = 10 perio
 
 Clustering is done using K-means algorithm with Lasso regression.
 
+TODO:
+Filter data in split_data folder to be unique sequences before clustering.
+Maybe it would be good to create separate folder for those filtered.  
+The best way to do it is rather to add the feature to grouping_raw_data script
+and after filtering do the embedded vector and clustering things.
+
