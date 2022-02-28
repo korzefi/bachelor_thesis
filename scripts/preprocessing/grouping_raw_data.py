@@ -22,7 +22,7 @@ class DirHandler:
         periods_dir = DirHandler.get_periods_dir()
         dir_paths = [split_data_root_dir, temporary_fasta_dir, temporary_csv_dir, periods_dir]
         for path in dir_paths:
-            DirHandler.__create_dir(path)
+            DirHandler.create_dir(path)
 
     @staticmethod
     def __get_split_data_root_path():
@@ -37,7 +37,7 @@ class DirHandler:
         return f'{DirHandler.__get_split_data_root_path()}/{DirHandler.temporary_csv_dir_name}'
 
     @staticmethod
-    def __create_dir(path):
+    def create_dir(path):
         try:
             os.makedirs(path)
         except FileExistsError:
@@ -206,10 +206,7 @@ class BatchCleaner:
     @staticmethod
     def remove_duplicates_periods():
         logging.info('Removing duplicated periods')
-        path = DirHandler.get_periods_dir()
-        file_names = os.listdir(path)
-        file_names.sort()
-        files = list(map(lambda file_name: f'{path}/{file_name}', file_names))
+        files = DirHandler.get_periods_file_names()
         for file in files:
             df = pd.read_csv(file)
             df.drop_duplicates(subset=['isolate_name'], inplace=True)
@@ -224,6 +221,18 @@ class BatchCleaner:
             df = pd.read_csv(file)
             rows_num = df.shape[0]
             BatchCleaner.__remove_file_if_empty(file, rows_num)
+
+    @staticmethod
+    def create_files_with_no_duplicate_sequences():
+        logging.info('Creating files with removed sequence duplicates')
+        periods_path = DirHandler.get_periods_dir()
+        files = DirHandler.get_files_names(dir_path=periods_path, extension='csv')
+        DirHandler.create_dir(f'{periods_path}/{cfg.PERIOD_UNIQUE_DIR_NAME}')
+        for file in files:
+            df = pd.read_csv(f'{periods_path}/{file}.csv')
+            df.drop_duplicates(subset=['sequence'], inplace=True)
+            df.to_csv(f'{periods_path}/{cfg.PERIOD_UNIQUE_DIR_NAME}/{file}.csv', index=False)
+            logging.info(f'created {file}.csv with unique sequences')
 
     @staticmethod
     def __remove_file_if_empty(file, rows_num):
@@ -346,6 +355,7 @@ def prepare_files():
     DirHandler.delete_temp_csv()
     BatchCleaner.remove_duplicates_periods()
     BatchCleaner.remove_empty_periods_dir()
+    BatchCleaner.create_files_with_no_duplicate_sequences()
 
 
 if __name__ == '__main__':
@@ -353,5 +363,9 @@ if __name__ == '__main__':
     # TODO: think about sequences that are not exactly 1273 long
     #       think about clays of sequnces (where there is some info about the clay)
     prepare_files()
+    # periods_path = DirHandler.get_periods_dir()
+    # files_names = DirHandler.get_files_names(dir_path=f'{periods_path}/{cfg.PERIOD_UNIQUE_DIR_NAME}', extension='csv')
+    # files = list(map(lambda file_name: f'{periods_path}/{cfg.PERIOD_UNIQUE_DIR_NAME}/{file_name}', files_names))
+    # for file in files:
+    #     print(os.system(f'wc -l {file}.csv'))
     logging.info("Done")
-

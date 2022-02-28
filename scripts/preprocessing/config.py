@@ -10,10 +10,10 @@ class GroupingRawData:
     FILES_NAME_CORE = 'spikeprot_batch_data'
     DIVISION_TECHNIQUE = 'month'
     PERIOD_ROOT_DIR_NAME = 'periods'
+    PERIOD_UNIQUE_DIR_NAME = 'unique'
 
 
 class Clustering:
     SPLIT_FILES_DIR_NAME = 'split_data'
-    DATA_PERIODS_PATH = f'{GroupingRawData.DATA_PARENT_PATH}/{GroupingRawData.SPLIT_FILES_DIR_NAME}/periods'
+    DATA_PERIODS_PATH = f'{GroupingRawData.DATA_PARENT_PATH}/{GroupingRawData.SPLIT_FILES_DIR_NAME}/periods/{GroupingRawData.PERIOD_UNIQUE_DIR_NAME}'
     PROT_VEC_PATH = ROOT_PATH + '/data/covid-spike-GISAID/spikeprot0104.tar/spikeprot0104/protVec_100d_3grams.csv'
-
