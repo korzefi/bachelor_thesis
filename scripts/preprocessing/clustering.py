@@ -2,6 +2,8 @@ import os
 import pandas as pd
 import logging
 from config import Clustering as cfg
+import scripts.utils as utils
+from natsort import natsorted
 
 
 class ProtVecTransformer:
@@ -9,19 +11,20 @@ class ProtVecTransformer:
     def transform_vector():
         logging.info('Transforming sequences')
         files = ProtVecTransformer.__get_files_names()
-        files.sort()
+        files = natsorted(files)
         prot_vec = pd.read_csv(cfg.PROT_VEC_PATH)
-        files_vectors = {}
+        utils.create_dir(cfg.VECTOR_TEMP_DIR_PATH)
+        files = files[7:]
         for file in files:
             logging.info(f'transforming sequences for file: {file}')
-            filepath = f'{cfg.DATA_PERIODS_PATH}/{file}'
+            filepath = f'{cfg.DATA_PERIODS_UNIQUE_PATH}/{file}'
             file_triplets = TripletMaker.createTriplets(filepath)
             file_vec = VectorTransformer.transform(file_triplets, prot_vec)
-            files_vectors[file] = file_vec
+            file_vec.to_csv(f'{cfg.VECTOR_TEMP_DIR_PATH}/{file}', index=False)
 
     @staticmethod
     def __get_files_names():
-        return os.listdir(cfg.DATA_PERIODS_PATH)
+        return os.listdir(cfg.DATA_PERIODS_UNIQUE_PATH)
 
 
 class TripletMaker:
@@ -49,6 +52,8 @@ class TripletMaker:
 
 
 class VectorTransformer:
+    VEC_DECIMAL_PLACES = 8
+
     @staticmethod
     def transform(file_triplets: [[]], prot_vec: pd.DataFrame) -> pd.DataFrame:
         """takes list of sequences of triplets
@@ -65,6 +70,7 @@ class VectorTransformer:
                 seq_result = pd.concat([seq_result, found])
             seq_vector = VectorTransformer.__add_embedded_vectors(seq_result)
             result = pd.concat([result, seq_vector], ignore_index=True)
+        VectorTransformer.__round_vector_df(result, decimals=VectorTransformer.VEC_DECIMAL_PLACES)
         return result
 
     @staticmethod
@@ -77,6 +83,11 @@ class VectorTransformer:
         return result
 
     @staticmethod
+    def __round_vector_df(df, decimals):
+        for column in df:
+            df[column] = df[column].round(decimals=decimals)
+
+    @staticmethod
     def __create_df_template(df: pd.DataFrame):
         return df.drop(df.index, inplace=False)
 
@@ -84,3 +95,4 @@ class VectorTransformer:
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     ProtVecTransformer.transform_vector()
+    logging.info('Done')

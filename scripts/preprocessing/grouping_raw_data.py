@@ -3,6 +3,8 @@ import subprocess
 import shutil
 import pandas as pd
 import logging
+import scripts.utils as utils
+from natsort import natsorted
 
 from config import GroupingRawData as cfg
 
@@ -38,10 +40,7 @@ class DirHandler:
 
     @staticmethod
     def create_dir(path):
-        try:
-            os.makedirs(path)
-        except FileExistsError:
-            logging.warning(f'{path} already exists')
+        utils.create_dir(path)
 
     @staticmethod
     def delete_temp_fasta():
@@ -56,7 +55,7 @@ class DirHandler:
     @staticmethod
     def get_files_names(dir_path, extension):
         file_names = os.listdir(dir_path)
-        file_names.sort()
+        file_names = natsorted(file_names)
         return list(map(lambda x: x.rstrip('.' + extension), file_names))
 
     @staticmethod
@@ -73,7 +72,7 @@ class DirHandler:
     def get_periods_file_names():
         path = DirHandler.get_periods_dir()
         file_names = os.listdir(path)
-        file_names.sort()
+        file_names = natsorted(file_names)
         return list(map(lambda file_name: f'{path}/{file_name}', file_names))
 
 
