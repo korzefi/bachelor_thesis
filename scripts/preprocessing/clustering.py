@@ -4,23 +4,24 @@ import logging
 from config import Clustering as cfg
 import scripts.utils as utils
 from natsort import natsorted
-
+import multiprocessing
 
 class ProtVecTransformer:
     @staticmethod
-    def transform_vector():
+    def transform_vector(numb):
         logging.info('Transforming sequences')
         files = ProtVecTransformer.__get_files_names()
         files = natsorted(files)
         prot_vec = pd.read_csv(cfg.PROT_VEC_PATH)
         utils.create_dir(cfg.VECTOR_TEMP_DIR_PATH)
-        files = files[7:]
+        files = files[numb:numb+1]
         for file in files:
             logging.info(f'transforming sequences for file: {file}')
             filepath = f'{cfg.DATA_PERIODS_UNIQUE_PATH}/{file}'
             file_triplets = TripletMaker.createTriplets(filepath)
             file_vec = VectorTransformer.transform(file_triplets, prot_vec)
             file_vec.to_csv(f'{cfg.VECTOR_TEMP_DIR_PATH}/{file}', index=False)
+        logging.info('Done')
 
     @staticmethod
     def __get_files_names():
@@ -94,5 +95,14 @@ class VectorTransformer:
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    ProtVecTransformer.transform_vector()
-    logging.info('Done')
+    # ProtVecTransformer.transform_vector()
+    # logging.info('Done')
+
+    processes = []
+    for i in range(15, 19):
+        p = multiprocessing.Process(target=ProtVecTransformer.transform_vector, args=(i,))
+        p.start()
+        processes.append(p)
+
+    for p in processes:
+        p.join()
