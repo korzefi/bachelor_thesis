@@ -1,3 +1,4 @@
+import logging
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
@@ -6,38 +7,54 @@ from scipy.cluster.hierarchy import dendrogram
 from config import MakingClusters as cfg
 
 
-def plot_clusters(clusters, method):
-    for cluster in clusters:
-        data_vecs = cluster['data']
-        labels = cluster['labels']
-
-
 class ReductionMethod:
     def __init__(self):
         self.data_vecs = []
         self.labels = []
 
     def reduce(self, clusters):
-        for cluster in clusters:
+        for counter, cluster in enumerate(clusters):
             self.data_vecs = cluster['data']
             self.labels = cluster['labels']
-            self._execute()
+            reduced_data = self._execute()
+            for i in range(len(reduced_data)):
+                colors = 10 * ['r.', 'g.', 'y.', 'c.', 'm.', 'b.', 'k.']
+                plt.plot(reduced_data[i][0], reduced_data[i][1], colors[self.labels[i]], markersize=10)
+
+            plt.savefig(f'{cfg.CLUSTER_PLOT_PATH}/{counter}')
+            plt.show()
 
     def _execute(self):
-        pass
+        return []
 
 
 class TSNEMethod:
     def _execute(self):
         all_jobs_activated = -1
         tsne = TSNE(n_components=cfg.PLOT_CLUSTERS_DIMS, n_jobs=all_jobs_activated, learning_rate='auto')
-        reduced_data = tsne.fit_transform(tsne)
+        return tsne.fit_transform(tsne)
 
 
 class PCAMethod(ReductionMethod):
     def _execute(self):
         pca = PCA(n_components=cfg.PLOT_CLUSTERS_DIMS)
-        pca_result = pca.fit_transform(pca)
+        reduced_data = pca.fit_transform(pca)
+        logging.info(f'Explained variance:{pca.explained_variance_ratio_}')
+        return reduced_data
+
+
+class ReductionMethodFactory:
+    def __init__(self):
+        self.methods = {'TSNE': TSNEMethod,
+                        'PCA': PCAMethod}
+
+    def create_method(self, method_name):
+        return self.methods[method_name]()
+
+
+def plot_clusters(clusters, method: ReductionMethod):
+    method.reduce(clusters)
+    fig = plt.figure()
 
 
 # TODO THIS PART IS TAKEN FROM INFLUENZA PAPER

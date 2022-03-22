@@ -1,6 +1,7 @@
 import logging
 from config import MakingClusters as cfg
 from ClusterCreator import ClusterCreator, ClusterMethodFactory
+from visualization import ReductionMethodFactory, plot_clusters
 
 
 class ClusterCreatorFactory:
@@ -17,9 +18,14 @@ def create_clusters():
     return cluster_creator.create_clusters(filename)
 
 
+def visualize():
+    reduction_factory = ReductionMethodFactory()
+    reduction_method = reduction_factory.create_method(cfg.REDUCTION_METHOD)
+    clusters = create_clusters()
+    plot_clusters(clusters, reduction_method)
+
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    clusters = create_clusters()
-    clusters = clusters[0]
-    print(clusters['data'], clusters['labels'], clusters['centroids'])
+    visualize()
     logging.info("Done")
