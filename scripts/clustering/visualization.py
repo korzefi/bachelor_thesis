@@ -13,6 +13,7 @@ class ReductionMethod:
         self.labels = []
 
     def reduce(self, clusters):
+        logging.info('Clusters are being reduced...')
         for counter, cluster in enumerate(clusters):
             self.data_vecs = cluster['data']
             self.labels = cluster['labels']
@@ -21,6 +22,7 @@ class ReductionMethod:
                 colors = 10 * ['r.', 'g.', 'y.', 'c.', 'm.', 'b.', 'k.']
                 plt.plot(reduced_data[i][0], reduced_data[i][1], colors[self.labels[i]], markersize=10)
 
+            # TODO change the way of naming files
             plt.savefig(f'{cfg.CLUSTER_PLOT_PATH}/{counter}')
             plt.show()
 
@@ -28,17 +30,17 @@ class ReductionMethod:
         return []
 
 
-class TSNEMethod:
+class TSNEMethod(ReductionMethod):
     def _execute(self):
         all_jobs_activated = -1
         tsne = TSNE(n_components=cfg.PLOT_CLUSTERS_DIMS, n_jobs=all_jobs_activated, learning_rate='auto')
-        return tsne.fit_transform(tsne)
+        return tsne.fit_transform(self.data_vecs)
 
 
 class PCAMethod(ReductionMethod):
     def _execute(self):
         pca = PCA(n_components=cfg.PLOT_CLUSTERS_DIMS)
-        reduced_data = pca.fit_transform(pca)
+        reduced_data = pca.fit_transform(self.data_vecs)
         logging.info(f'Explained variance:{pca.explained_variance_ratio_}')
         return reduced_data
 

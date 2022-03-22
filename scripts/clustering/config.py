@@ -14,4 +14,4 @@ class MakingClusters:
 
 
 class KMeansConfig:
-    INITIAL_N_CLUSTERS = 3
+    N_CLUSTERS = 3
