@@ -1,7 +1,7 @@
 import logging
 from config import MakingClusters as cfg
 from ClusterCreator import ClusterCreator, ClusterMethodFactory
-from visualization import ReductionMethodFactory, plot_clusters
+from visualization import ReductionMethodFactory, plot_clusters, plot_elbow_method
 
 
 class ClusterCreatorFactory:
@@ -14,17 +14,18 @@ class ClusterCreatorFactory:
 
 def create_clusters():
     # TODO change to many files
-    filename = '2020-11.csv'
+    filename = '2020-1.csv'
     cluster_creator = ClusterCreatorFactory.create()
-    return cluster_creator.create_clusters(filename)
+    return cluster_creator.create_clusters(filename, 8)
 
 
 def visualize():
     reduction_factory = ReductionMethodFactory()
     reduction_method = reduction_factory.create_method(cfg.REDUCTION_METHOD)
-    clusters = create_clusters()
-    logging.info('Clusters created')
-    plot_clusters(clusters, reduction_method)
+    all_clusters = create_clusters()
+    logging.info(f'Clusters created')
+    # plot_elbow_method(all_clusters)
+    plot_clusters(all_clusters[0], reduction_method)
 
 
 if __name__ == '__main__':

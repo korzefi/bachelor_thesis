@@ -13,18 +13,13 @@ class ReductionMethod:
         self.labels = []
 
     def reduce(self, clusters):
-        logging.info('Clusters are being reduced...')
-        for counter, cluster in enumerate(clusters):
-            self.data_vecs = cluster['data']
-            self.labels = cluster['labels']
-            reduced_data = self._execute()
-            for i in range(len(reduced_data)):
-                colors = 10 * ['r.', 'g.', 'y.', 'c.', 'm.', 'b.', 'k.']
-                plt.plot(reduced_data[i][0], reduced_data[i][1], colors[self.labels[i]], markersize=10)
-
-            # TODO change the way of naming files
-            plt.savefig(f'{cfg.CLUSTER_PLOT_PATH}/{counter}')
-            plt.show()
+        logging.info('Clusters data are being reduced...')
+        self.data_vecs = clusters['data']
+        self.labels = clusters['labels']
+        reduced_data = self._execute()
+        for i in range(len(reduced_data)):
+            colors = 10 * ['r.', 'g.', 'y.', 'c.', 'm.', 'b.', 'k.']
+            plt.plot(reduced_data[i][0], reduced_data[i][1], colors[self.labels[i]], markersize=10)
 
     def _execute(self):
         return []
@@ -54,9 +49,20 @@ class ReductionMethodFactory:
         return self.methods[method_name]()
 
 
-def plot_clusters(clusters, method: ReductionMethod):
+def plot_clusters(clusters, method: ReductionMethod, save_fig=True):
     method.reduce(clusters)
-    fig = plt.figure()
+    # TODO change the way of naming files
+    if save_fig:
+        plt.savefig(f'{cfg.CLUSTER_PLOT_PATH}/{0}')
+    plt.show()
+
+
+def plot_elbow_method(all_clusters: {}):
+    if cfg.CLUSTER_METHOD != 'KMeans':
+        logging.warning(f'Elbow cannot be plotted for {cfg.CLUSTER_METHOD}, change to KMeans')
+    for clusters in all_clusters:
+        plt.plot(clusters['n_clusters'], clusters['distortion'], 'k.', markersize=10)
+    plt.show()
 
 
 # TODO THIS PART IS TAKEN FROM INFLUENZA PAPER

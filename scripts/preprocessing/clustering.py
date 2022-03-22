@@ -9,6 +9,7 @@ import multiprocessing
 class ProtVecTransformer:
     @staticmethod
     def transform_vector(numb):
+        logging.basicConfig(level=logging.INFO)
         logging.info('Transforming sequences')
         files = ProtVecTransformer.__get_files_names()
         files = natsorted(files)
@@ -94,12 +95,12 @@ class VectorTransformer:
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
+    # logging.basicConfig(level=logging.INFO)
     # ProtVecTransformer.transform_vector()
     # logging.info('Done')
 
     processes = []
-    for i in range(15, 19):
+    for i in range(15, 17):
         p = multiprocessing.Process(target=ProtVecTransformer.transform_vector, args=(i,))
         p.start()
         processes.append(p)
