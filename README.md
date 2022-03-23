@@ -22,5 +22,5 @@ Clustering is done by creating clusters for each period and then linking those c
 Clusters are linked in a way that euclidean distance is taken in concesutive years - if cluster from period i has the minimum distance to other cluster from period i+1, it is linked.
 Then for each sequence in those clusters, data is constructed (window = 10 periods by default => means 10 columns of sequences and y column is for window+1 period).
 
-Clustering is done using K-means algorithm with Lasso regression.
+Clustering is done using K-means and to visualization - PCA and t-sne reduction methods.
 

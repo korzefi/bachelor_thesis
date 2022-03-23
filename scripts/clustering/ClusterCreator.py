@@ -20,6 +20,7 @@ class KMeansMethod(ClusterMethod):
 
     def _execute(self, period_vec_data, n_clusters) -> {}:
         # by the supplementary it is changed by user in each year using Elbow method
+        all_jobs_activated = -1
         clf = KMeans(n_clusters=n_clusters, n_init=KMeansConfig.N_ITERATIONS_INIT)
         clf.fit(period_vec_data)
         labels = clf.labels_
@@ -46,11 +47,11 @@ class ClusterCreator:
         self.cluster_method = cluster_method
         self.__all_clusters = []
 
-    def create_clusters(self, filename, n_clusters=None):
+    def create_clusters(self, filename, use_range=True, n_clusters=None):
         filepath = self.__get_filepath(filename)
         df = pd.read_csv(filepath)
         logging.info(f'Clustering sequences, file: {filename}')
-        if n_clusters is None:
+        if (n_clusters is None) or (use_range is True):
             return self.__create_plenty_clusters_versions(df)
         else:
             return self.__create_specific_clusters_variant(df, n_clusters)
