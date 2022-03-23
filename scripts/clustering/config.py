@@ -19,3 +19,7 @@ class KMeansConfig:
     """N_ITERATIONS_INIT - number of iterations with random initializations of centroids,
         where the one with the smallest distortion (cost function) is picked"""
     N_ITERATIONS_INIT = 10000
+
+
+class LinkingClusters:
+    epitopes = []
