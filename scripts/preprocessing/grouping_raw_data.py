@@ -3,10 +3,11 @@ import subprocess
 import shutil
 import pandas as pd
 import logging
-import scripts.utils as utils
+
 from natsort import natsorted
 
-from config import GroupingRawData as cfg
+import scripts.utils as utils
+from scripts.preprocessing.config import GroupingRawData as cfg
 
 
 class DirHandler:

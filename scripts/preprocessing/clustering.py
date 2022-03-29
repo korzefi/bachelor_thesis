@@ -1,21 +1,28 @@
 import os
-import pandas as pd
 import logging
-from config import Clustering as cfg
-import scripts.utils as utils
-from natsort import natsorted
 import multiprocessing
+
+import pandas as pd
+from natsort import natsorted
+
+import scripts.utils as utils
+from scripts.preprocessing.config import Clustering as cfg
+from scripts.clustering.making_clusters import ClusterCreatorFactory
+
+LOGGING_PROCESSES_ENABLED = True
+
 
 class ProtVecTransformer:
     @staticmethod
-    def transform_vector(numb):
-        logging.basicConfig(level=logging.INFO)
+    def transform_vector(file_num):
+        if LOGGING_PROCESSES_ENABLED:
+            logging.basicConfig(level=logging.INFO)
         logging.info('Transforming sequences')
         files = ProtVecTransformer.__get_files_names()
         files = natsorted(files)
         prot_vec = pd.read_csv(cfg.PROT_VEC_PATH)
         utils.create_dir(cfg.VECTOR_TEMP_DIR_PATH)
-        files = files[numb:numb+1]
+        files = files[file_num:file_num + 1]
         for file in files:
             logging.info(f'transforming sequences for file: {file}')
             filepath = f'{cfg.DATA_PERIODS_UNIQUE_PATH}/{file}'
@@ -94,16 +101,47 @@ class VectorTransformer:
         return df.drop(df.index, inplace=False)
 
 
-if __name__ == '__main__':
-    # logging.basicConfig(level=logging.INFO)
-    # ProtVecTransformer.transform_vector()
-    # logging.info('Done')
-
+def transform_vectors_multiprocess(first_file_num, last_file_num):
     processes = []
-    for i in range(15, 17):
+    for i in range(first_file_num, last_file_num + 1):
         p = multiprocessing.Process(target=ProtVecTransformer.transform_vector, args=(i,))
         p.start()
         processes.append(p)
 
     for p in processes:
         p.join()
+
+
+class ClusterDataCreator:
+    @staticmethod
+    def create(filepath, n_clusters, modify_file=False):
+        cluster_creator = ClusterCreatorFactory.create()
+        clusters = cluster_creator.create_clusters(filepath=filepath, use_range=False, n_clusters=n_clusters)
+        filename = filepath.split('/')[-1]
+        if modify_file:
+            ClusterDataCreator.__add_cluster_column(filename, clusters['labels'])
+        ClusterDataCreator.__add_centroids_data(filename, clusters['centroids'])
+
+    @staticmethod
+    def __add_cluster_column(filename, labels):
+        filepath = f'{cfg.DATA_PERIODS_UNIQUE_PATH}/{filename}'
+        df = pd.read_csv(filepath)
+        df.drop(['cluster'], axis=1, inplace=True)
+        df.insert(loc=0, column='cluster', value=labels)
+        df.to_csv(filepath, index=False)
+
+    @staticmethod
+    def __add_centroids_data(filename, centroids):
+        filepath = 'add filepath of the centroid file to the config'
+        df = pd.read_csv(filepath)
+        for cluster_id, centroid in enumerate(centroids):
+            row = pd.DataFrame([filename, cluster_id, centroid])
+            df.append(row, ignore_index=True)
+
+
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+    file = '2020-3.csv'
+    n_clusters = 2
+    filepath = f'{cfg.VECTOR_TEMP_DIR_PATH}/{file}'
+    ClusterDataCreator.create(filepath, n_clusters, modify_file=False)

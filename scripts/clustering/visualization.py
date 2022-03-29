@@ -1,10 +1,10 @@
 import logging
+
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
-from scipy.cluster.hierarchy import dendrogram
 
-from config import MakingClusters as cfg
+from scripts.clustering.config import MakingClusters as cfg
 
 
 class ReductionMethod:
