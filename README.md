@@ -30,6 +30,7 @@ Clustering is done using K-means and to visualization - PCA and t-sne reduction 
 - add cluster column for files in periods/unique representing num of cluster it belongs to (indexing from 0) - for this
   case data need to be clustered again (do not need to be visualized) and the corresponding labels have to be added as a
   column num to these files
+- sort the centroids data by period
 - clusters from consecutive periods are needed to be linked on the base of centroids distances and indexes registered (
   ex. [0, 0, 1, 3, 1, 1, 1, 2, 0, 0])
 - pick randomly n of rows from a 'linked' cluster and get current position (+/- 2) positions

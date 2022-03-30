@@ -21,6 +21,6 @@ class Clustering:
     PROT_VEC_PATH = ROOT_PATH + '/data/covid-spike-GISAID/spikeprot0104.tar/spikeprot0104/protVec_100d_3grams.csv'
     VECTOR_TEMP_DIR_NAME = 'sequences_as_vectors'
     VECTOR_TEMP_DIR_PATH = f'{DATA_PERIODS_UNIQUE_PATH}/{VECTOR_TEMP_DIR_NAME}'
-    CLUSTERS_CENTROIDS_DATA_PATH = f'{DATA_PERIODS_UNIQUE_PATH}/"clusters_centroids_data.txt"'
+    CLUSTERS_CENTROIDS_DATA_PATH = f'{DATA_PERIODS_UNIQUE_PATH}/clusters_centroids_data.csv'
 
 

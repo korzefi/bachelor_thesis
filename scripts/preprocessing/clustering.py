@@ -6,8 +6,9 @@ import pandas as pd
 from natsort import natsorted
 
 import scripts.utils as utils
-from scripts.preprocessing.config import Clustering as cfg
+from scripts.preprocessing.config import Clustering
 from scripts.clustering.making_clusters import ClusterCreatorFactory
+
 
 LOGGING_PROCESSES_ENABLED = True
 
@@ -20,20 +21,20 @@ class ProtVecTransformer:
         logging.info('Transforming sequences')
         files = ProtVecTransformer.__get_files_names()
         files = natsorted(files)
-        prot_vec = pd.read_csv(cfg.PROT_VEC_PATH)
-        utils.create_dir(cfg.VECTOR_TEMP_DIR_PATH)
+        prot_vec = pd.read_csv(Clustering.PROT_VEC_PATH)
+        utils.create_dir(Clustering.VECTOR_TEMP_DIR_PATH)
         files = files[file_num:file_num + 1]
         for file in files:
             logging.info(f'transforming sequences for file: {file}')
-            filepath = f'{cfg.DATA_PERIODS_UNIQUE_PATH}/{file}'
+            filepath = f'{Clustering.DATA_PERIODS_UNIQUE_PATH}/{file}'
             file_triplets = TripletMaker.createTriplets(filepath)
             file_vec = VectorTransformer.transform(file_triplets, prot_vec)
-            file_vec.to_csv(f'{cfg.VECTOR_TEMP_DIR_PATH}/{file}', index=False)
+            file_vec.to_csv(f'{Clustering.VECTOR_TEMP_DIR_PATH}/{file}', index=False)
         logging.info('Done')
 
     @staticmethod
     def __get_files_names():
-        return os.listdir(cfg.DATA_PERIODS_UNIQUE_PATH)
+        return os.listdir(Clustering.DATA_PERIODS_UNIQUE_PATH)
 
 
 class TripletMaker:
@@ -124,7 +125,7 @@ class ClusterDataCreator:
 
     @staticmethod
     def __add_cluster_column(filename, labels):
-        filepath = f'{cfg.DATA_PERIODS_UNIQUE_PATH}/{filename}'
+        filepath = f'{Clustering.DATA_PERIODS_UNIQUE_PATH}/{filename}'
         df = pd.read_csv(filepath)
         df.drop(['cluster'], axis=1, inplace=True)
         df.insert(loc=0, column='cluster', value=labels)
@@ -132,16 +133,39 @@ class ClusterDataCreator:
 
     @staticmethod
     def __add_centroids_data(filename, centroids):
-        filepath = 'add filepath of the centroid file to the config'
+        ClusterDataCreator.__create_centroid_file_if_not_exist()
+        period = filename[:-4]
+        filepath = Clustering.CLUSTERS_CENTROIDS_DATA_PATH
+        columns = ClusterDataCreator.__create_columns_headers()
         df = pd.read_csv(filepath)
-        for cluster_id, centroid in enumerate(centroids):
-            row = pd.DataFrame([filename, cluster_id, centroid])
-            df.append(row, ignore_index=True)
+        for cluster_num, centroid in enumerate(centroids):
+            data = [period, cluster_num]
+            data += centroid.tolist()
+            row = pd.DataFrame([data], columns=columns)
+            df = pd.concat([df, row], ignore_index=True)
+        df.reset_index(drop=True, inplace=True)
+        df.to_csv(filepath, index=False)
+
+    @staticmethod
+    def __create_centroid_file_if_not_exist():
+        filepath = Clustering.CLUSTERS_CENTROIDS_DATA_PATH
+        if os.path.exists(filepath):
+            return
+        columns = ClusterDataCreator.__create_columns_headers()
+        df = pd.DataFrame(columns=columns)
+        df.to_csv(filepath, index=False, header=True)
+
+    @staticmethod
+    def __create_columns_headers():
+        columns = ['period', 'cluster']
+        cols_100dim = ['d' + str(i) for i in range(1, 101)]
+        columns += cols_100dim
+        return columns
 
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    file = '2020-3.csv'
+    file = '2020-6.csv'
     n_clusters = 2
-    filepath = f'{cfg.VECTOR_TEMP_DIR_PATH}/{file}'
+    filepath = f'{Clustering.VECTOR_TEMP_DIR_PATH}/{file}'
     ClusterDataCreator.create(filepath, n_clusters, modify_file=False)
