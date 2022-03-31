@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 
-from scripts.clustering.config import MakingClusters as cfg
+from scripts.clustering.config import MakingClusters, TsneConfig
 
 
 class ReductionMethod:
@@ -30,13 +30,18 @@ class ReductionMethod:
 class TSNEMethod(ReductionMethod):
     def _execute(self):
         all_jobs_activated = -1
-        tsne = TSNE(n_components=cfg.PLOT_CLUSTERS_DIMS, n_jobs=all_jobs_activated, learning_rate='auto')
+        tsne = TSNE(init='pca',
+                    n_components=MakingClusters.PLOT_CLUSTERS_DIMS,
+                    n_jobs=all_jobs_activated,
+                    learning_rate='auto',
+                    n_iter=TsneConfig.N_ITER,
+                    n_iter_without_progress=TsneConfig.N_ITER_WITHOUT_PROGRESS)
         return tsne.fit_transform(self.data_vecs)
 
 
 class PCAMethod(ReductionMethod):
     def _execute(self):
-        pca = PCA(n_components=cfg.PLOT_CLUSTERS_DIMS)
+        pca = PCA(n_components=MakingClusters.PLOT_CLUSTERS_DIMS)
         reduced_data = pca.fit_transform(self.data_vecs)
         logging.info(f'Explained variance:{pca.explained_variance_ratio_}')
         return reduced_data
@@ -54,13 +59,13 @@ class ReductionMethodFactory:
 def plot_clusters(clusters, method: ReductionMethod, filename, save_fig=True):
     method.reduce(clusters)
     if save_fig:
-        plt.savefig(f'{cfg.CLUSTER_PLOT_PATH}/{filename}')
+        plt.savefig(f'{MakingClusters.CLUSTER_PLOT_PATH}/{filename}')
     plt.show()
 
 
-def plot_elbow_method(all_clusters: {}):
-    if cfg.CLUSTER_METHOD != 'KMeans':
-        logging.warning(f'Elbow cannot be plotted for {cfg.CLUSTER_METHOD}, change to KMeans')
+def plot_elbow_method(all_clusters: {}, save_fig=False):
+    if MakingClusters.CLUSTER_METHOD != 'KMeans':
+        logging.warning(f'Elbow cannot be plotted for {MakingClusters.CLUSTER_METHOD}, change to KMeans')
     for clusters in all_clusters:
         plt.plot(clusters['n_clusters'], clusters['distortion'], 'k.', markersize=10)
     plt.show()
