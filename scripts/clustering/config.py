@@ -4,7 +4,7 @@ ROOT_PATH = get_root_path()
 
 
 class MakingClusters:
-    REDUCTION_METHOD = 'TSNE'
+    REDUCTION_METHOD = 'PCA'
     CLUSTER_METHOD = 'KMeans'
     PLOT_CLUSTERS_DIMS = 2
     INIT_N_CLUSTERS = 2
@@ -17,13 +17,13 @@ class MakingClusters:
 class KMeansConfig:
     """N_ITERATIONS_INIT - number of iterations with random initializations of centroids,
         where the one with the smallest distortion (cost function) is picked"""
-    N_ITERATIONS_INIT = 1000
+    N_ITERATIONS_INIT = 3000
     MAX_ITER = 500
 
 
 class TsneConfig:
-    N_ITER = 3000
-    N_ITER_WITHOUT_PROGRESS = 500
+    N_ITER = 1000
+    N_ITER_WITHOUT_PROGRESS = 300
 
 
 class LinkingClusters:

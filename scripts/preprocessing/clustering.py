@@ -1,14 +1,16 @@
 import os
 import logging
 import multiprocessing
+from itertools import product
 
 import pandas as pd
 from natsort import natsorted
+from natsort import natsort_keygen
+import numpy as np
 
 import scripts.utils as utils
 from scripts.preprocessing.config import Clustering
 from scripts.clustering.making_clusters import ClusterCreatorFactory
-
 
 LOGGING_PROCESSES_ENABLED = True
 
@@ -115,7 +117,7 @@ def transform_vectors_multiprocess(first_file_num, last_file_num):
 
 class ClusterDataCreator:
     @staticmethod
-    def create(filepath, n_clusters, modify_file=False):
+    def create_centroids_data(filepath, n_clusters, modify_file=False):
         cluster_creator = ClusterCreatorFactory.create()
         clusters = cluster_creator.create_clusters(filepath=filepath, use_range=False, n_clusters=n_clusters)
         filename = filepath.split('/')[-1]
@@ -127,7 +129,7 @@ class ClusterDataCreator:
     def __add_cluster_column(filename, labels):
         filepath = f'{Clustering.DATA_PERIODS_UNIQUE_PATH}/{filename}'
         df = pd.read_csv(filepath)
-        df.drop(['cluster'], axis=1, inplace=True)
+        df.drop(['cluster'], axis=1, inplace=True, errors='ignore')
         df.insert(loc=0, column='cluster', value=labels)
         df.to_csv(filepath, index=False)
 
@@ -163,9 +165,81 @@ class ClusterDataCreator:
         return columns
 
 
+class ClusterLinker:
+    @staticmethod
+    def link(sort_centroids_file=True):
+        filepath = Clustering.CLUSTERS_CENTROIDS_DATA_PATH
+        df = pd.read_csv(filepath)
+        sorted_df = ClusterLinker.__sort_centroids(df)
+        if sort_centroids_file:
+            sorted_df.to_csv(filepath, index=False)
+        curr_clusters_links, next_clusters_links = ClusterLinker.__get_links(df)
+        # TODO: change for just next links
+        df.drop(['prev_cluster', 'next_cluster'], axis=1, inplace=True, errors='ignore')
+        df.insert(loc=2, column='prev_cluster', value=curr_clusters_links.values())
+        df.insert(loc=3, column='next_cluster', value=next_clusters_links.values())
+
+
+    @staticmethod
+    def __sort_centroids(df):
+        df.sort_values(by=['period', 'cluster'], key=natsort_keygen(), inplace=True)
+        return df
+
+    @staticmethod
+    def __get_links(df):
+        periods = df['period'].unique()
+        cols_100dim = ['d' + str(i) for i in range(1, 101)]
+        # dicts {row_index: linked_cluster}
+        curr_clusters_links = {}
+        next_clusters_links = {}
+        if len(periods) < 2:
+            ValueError('Not enough periods to link clusters')
+        for i in range(len(periods) - 1):
+            current_period = periods[i]
+            next_period = periods[i+1]
+            curr_clusters_links.update(ClusterLinker.__link_current_clusters(df, current_period, next_period, cols_100dim))
+            next_clusters_links.update(ClusterLinker.__link_next_clusters(df, current_period, next_period, cols_100dim))
+        return curr_clusters_links, next_clusters_links
+
+    @staticmethod
+    def __link_current_clusters(df, current_per, next_per, cols):
+        curr_links = {}
+        for index1, per1 in df[df['period'] == current_per].iterrows():
+            dist_min = {}
+            for index2, per2 in df[df['period'] == next_per].iterrows():
+                dist = ClusterLinker.__get_euclidean_dist(per1, per2, cols)
+                cluster_num = per2['cluster']
+                dist_min[cluster_num] = dist
+            min_cluster = min(dist_min, key=dist_min.get)
+            curr_links[index1] = min_cluster
+        return curr_links
+
+
+    @staticmethod
+    def __link_next_clusters(df, current_per, next_per, cols):
+        next_links = {}
+        for index2, per2 in df[df['period'] == next_per].iterrows():
+            dist_min = {}
+            for index1, per1 in df[df['period'] == current_per].iterrows():
+                dist = ClusterLinker.__get_euclidean_dist(per1, per2, cols)
+                cluster_num = per2['cluster']
+                dist_min[cluster_num] = dist
+            min_cluster = min(dist_min, key=dist_min.get)
+            next_links[index2] = min_cluster
+        return next_links
+
+    @staticmethod
+    def __get_euclidean_dist(per1, per2, cols):
+        per1 = np.array(per1[cols])
+        per2 = np.array(per2[cols])
+        dist = np.linalg.norm(per1 - per2)
+        return dist
+
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    file = '2020-6.csv'
-    n_clusters = 2
-    filepath = f'{Clustering.VECTOR_TEMP_DIR_PATH}/{file}'
-    ClusterDataCreator.create(filepath, n_clusters, modify_file=False)
+    # file = '2021-1.csv'
+    # n_clusters = 3
+    # filepath = f'{Clustering.VECTOR_TEMP_DIR_PATH}/{file}'
+    # ClusterDataCreator.create_centroids_data(filepath, n_clusters, modify_file=True)
+    ClusterLinker.link(sort_centroids_file=False)

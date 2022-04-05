@@ -4,10 +4,10 @@ from scripts.clustering.config import MakingClusters
 from scripts.clustering.ClusterCreator import ClusterCreator, ClusterMethodFactory
 from scripts.clustering.visualization import ReductionMethodFactory, plot_clusters, plot_elbow_method
 
-FILENAME_TO_BE_PROCEED = '2021-2.csv'
+FILENAME_TO_BE_PROCEED = '2020-12.csv'
 USE_RANGE_CLUSTERS = False
 # this will be skipped if USE_RANGE_CLUSTERS is set, otherwise there will be only N_CLUSTERS version created
-N_CLUSTERS = 5
+N_CLUSTERS = 7
 SAVE_FIG = True
 
 
@@ -27,17 +27,18 @@ def create_clusters():
 
 def visualize():
     reduction_factory = ReductionMethodFactory()
-    # reduction_method = reduction_factory.create_method(MakingClusters.REDUCTION_METHOD)
-    reduction_method1 = reduction_factory.create_method('PCA')
-    reduction_method2 = reduction_factory.create_method('TSNE')
+    reduction_method = reduction_factory.create_method(MakingClusters.REDUCTION_METHOD)
+    # reduction_method1 = reduction_factory.create_method('PCA')
+    # reduction_method2 = reduction_factory.create_method('TSNE')
     clusters = create_clusters()
     logging.info(f'Clusters created')
     if USE_RANGE_CLUSTERS is True:
         plot_elbow_method(clusters)
     else:
         filename = f'{FILENAME_TO_BE_PROCEED[:-4]}-c{N_CLUSTERS}'
-        plot_clusters(clusters, reduction_method1, filename, save_fig=SAVE_FIG)
-        plot_clusters(clusters, reduction_method2, filename, save_fig=SAVE_FIG)
+        plot_clusters(clusters, reduction_method, filename, save_fig=SAVE_FIG)
+        # plot_clusters(clusters, reduction_method1, filename, save_fig=SAVE_FIG)
+        # plot_clusters(clusters, reduction_method2, filename, save_fig=SAVE_FIG)
 
 
 if __name__ == '__main__':
