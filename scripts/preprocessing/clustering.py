@@ -167,18 +167,17 @@ class ClusterDataCreator:
 
 class ClusterLinker:
     @staticmethod
-    def link(sort_centroids_file=True):
+    def link():
+        logging.info('Linking clusters')
         filepath = Clustering.CLUSTERS_CENTROIDS_DATA_PATH
         df = pd.read_csv(filepath)
         sorted_df = ClusterLinker.__sort_centroids(df)
-        if sort_centroids_file:
-            sorted_df.to_csv(filepath, index=False)
-        curr_clusters_links, next_clusters_links = ClusterLinker.__get_links(df)
+        next_clusters_links = ClusterLinker.__get_links(df)
         # TODO: change for just next links
-        df.drop(['prev_cluster', 'next_cluster'], axis=1, inplace=True, errors='ignore')
-        df.insert(loc=2, column='prev_cluster', value=curr_clusters_links.values())
-        df.insert(loc=3, column='next_cluster', value=next_clusters_links.values())
-
+        df.drop(['next_cluster'], axis=1, inplace=True, errors='ignore')
+        df.insert(loc=2, column='next_cluster', value=next_clusters_links)
+        df.to_csv(filepath, index=False)
+        logging.info('clusters linked')
 
     @staticmethod
     def __sort_centroids(df):
@@ -189,44 +188,45 @@ class ClusterLinker:
     def __get_links(df):
         periods = df['period'].unique()
         cols_100dim = ['d' + str(i) for i in range(1, 101)]
-        # dicts {row_index: linked_cluster}
-        curr_clusters_links = {}
-        next_clusters_links = {}
+        # dicts {row_index: linked_cluster_row_idx}
+        forward_links = {}
+        backward_links = {}
         if len(periods) < 2:
             ValueError('Not enough periods to link clusters')
         for i in range(len(periods) - 1):
             current_period = periods[i]
-            next_period = periods[i+1]
-            curr_clusters_links.update(ClusterLinker.__link_current_clusters(df, current_period, next_period, cols_100dim))
-            next_clusters_links.update(ClusterLinker.__link_next_clusters(df, current_period, next_period, cols_100dim))
-        return curr_clusters_links, next_clusters_links
+            next_period = periods[i + 1]
+            forward_links.update(
+                ClusterLinker.__link_clusters_idx_forward(df, current_period, next_period, cols_100dim))
+            backward_links.update(
+                ClusterLinker.__link_clusters_idx_backward(df, current_period, next_period, cols_100dim))
+        combined_idx_links = ClusterLinker.__combine_idx_links(forward_links, backward_links)
+        clusters_vals = ClusterLinker.__get_clusters_values(df['cluster'], combined_idx_links)
+        return clusters_vals
 
     @staticmethod
-    def __link_current_clusters(df, current_per, next_per, cols):
-        curr_links = {}
+    def __link_clusters_idx_forward(df, current_per, next_per, cols):
+        links = {}
         for index1, per1 in df[df['period'] == current_per].iterrows():
             dist_min = {}
             for index2, per2 in df[df['period'] == next_per].iterrows():
                 dist = ClusterLinker.__get_euclidean_dist(per1, per2, cols)
-                cluster_num = per2['cluster']
-                dist_min[cluster_num] = dist
-            min_cluster = min(dist_min, key=dist_min.get)
-            curr_links[index1] = min_cluster
-        return curr_links
-
+                dist_min[index2] = dist
+            min_dist_idx = min(dist_min, key=dist_min.get)
+            links[index1] = min_dist_idx
+        return links
 
     @staticmethod
-    def __link_next_clusters(df, current_per, next_per, cols):
-        next_links = {}
+    def __link_clusters_idx_backward(df, current_per, next_per, cols):
+        links = {}
         for index2, per2 in df[df['period'] == next_per].iterrows():
             dist_min = {}
             for index1, per1 in df[df['period'] == current_per].iterrows():
                 dist = ClusterLinker.__get_euclidean_dist(per1, per2, cols)
-                cluster_num = per2['cluster']
-                dist_min[cluster_num] = dist
-            min_cluster = min(dist_min, key=dist_min.get)
-            next_links[index2] = min_cluster
-        return next_links
+                dist_min[index1] = dist
+            min_dist_idx = min(dist_min, key=dist_min.get)
+            links[index2] = min_dist_idx
+        return links
 
     @staticmethod
     def __get_euclidean_dist(per1, per2, cols):
@@ -235,6 +235,71 @@ class ClusterLinker:
         dist = np.linalg.norm(per1 - per2)
         return dist
 
+    @staticmethod
+    def __combine_idx_links(forward_links, backward_links):
+        links = {}
+        ClusterLinker.__transform_idx_links(forward_links, backward_links)
+        links.update(forward_links)
+        for k, v in backward_links.items():
+            if k in links:
+                links[k].extend(backward_links[k])
+            else:
+                links[k] = backward_links[k]
+        links = {k: list(set(v)) for k, v in links.items()}
+        [v.sort() for v in links.values()]
+        return links
+
+    @staticmethod
+    def __transform_idx_links(forward_links, backward_links):
+        ClusterLinker.__transform_forward_links_to_lists(forward_links)
+        ClusterLinker.__reverse_backward_links(backward_links)
+
+    @staticmethod
+    def __reverse_backward_links(backward_links):
+        temp = {}
+        for key, value in backward_links.items():
+            if value in temp:
+                temp[value].append(key)
+            else:
+                temp[value] = [key]
+        backward_links.clear()
+        backward_links.update(temp)
+
+    @staticmethod
+    def __transform_forward_links_to_lists(forward_links):
+        temp = {k: [v] for k, v in forward_links.items()}
+        forward_links.clear()
+        forward_links.update(temp)
+
+    @staticmethod
+    def __get_clusters_values(clusters_data, combined_idx_links):
+        clusters = ClusterLinker.__transform_to_clusters(clusters_data, combined_idx_links)
+        cluster_numeric_vals = ClusterLinker.__fill_missing_clusters(clusters, len(clusters_data.index))
+        cluster_vals = ClusterLinker.__clusters_links_to_str_format(cluster_numeric_vals)
+        return cluster_vals
+
+    @staticmethod
+    def __transform_to_clusters(clusters_data, combined_idx_links):
+        clusters = {}
+        for idx, idx_links in combined_idx_links.items():
+            clusters[idx] = [clusters_data.iloc[idx_link] for idx_link in idx_links]
+        return clusters
+
+    @staticmethod
+    def __fill_missing_clusters(clusters, idx_num):
+        for i in range(idx_num):
+            if i not in clusters:
+                clusters[i] = ''
+        return list(clusters.values())
+
+    @staticmethod
+    def __clusters_links_to_str_format(cluster_numeric_vals):
+        # format is 'cluster1-cluster2...-clustern' ex. '0-2-3' or '' for empty
+        # clusters_data = [str(cluster) for clusters in cluster_numeric_vals for cluster in clusters]
+        for i in range (len(cluster_numeric_vals)):
+            cluster_numeric_vals[i] = list(map(lambda x: str(x), cluster_numeric_vals[i]))
+        return list(map(lambda clusters: '-'.join(clusters), cluster_numeric_vals))
+
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
@@ -242,4 +307,4 @@ if __name__ == '__main__':
     # n_clusters = 3
     # filepath = f'{Clustering.VECTOR_TEMP_DIR_PATH}/{file}'
     # ClusterDataCreator.create_centroids_data(filepath, n_clusters, modify_file=True)
-    ClusterLinker.link(sort_centroids_file=False)
+    ClusterLinker.link()
