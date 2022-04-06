@@ -173,7 +173,6 @@ class ClusterLinker:
         df = pd.read_csv(filepath)
         sorted_df = ClusterLinker.__sort_centroids(df)
         next_clusters_links = ClusterLinker.__get_links(df)
-        # TODO: change for just next links
         df.drop(['next_cluster'], axis=1, inplace=True, errors='ignore')
         df.insert(loc=2, column='next_cluster', value=next_clusters_links)
         df.to_csv(filepath, index=False)
