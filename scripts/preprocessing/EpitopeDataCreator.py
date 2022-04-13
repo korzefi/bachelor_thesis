@@ -138,20 +138,36 @@ class EpitopeDataCreator:
         return [protvec.index[protvec['words'] == triplet].tolist()[0] for triplet in triplets]
 
     def __transform_to_datasets(self, epitopes_samples):
-        # TODO: create appropriate dataframe here
-        df = pd.DataFrame()
+        df = self.__create_dataset_dataframe()
         for sample in epitopes_samples:
             seq_len = len(sample[0])
             for i in range(seq_len):
                 row = []
-                for seq_num, seq in enumerate(sample):
+                for seq in sample:
                     row.append(seq[i])
+                row = self.__adjust_row_for_dataset(row)
+                df.loc[len(df) + 1] = row
+        # TODO: add saving df to file and checking for existence, shuffle all rows
+
+    def __create_dataset_dataframe(self):
+        columns = ['y']
+        columns_x = [str(i) for i in range(self.window_size)]
+        columns += columns_x
+        df = pd.DataFrame(columns=columns)
+        df.reset_index(drop=True, inplace=True)
+        return df
 
     def __adjust_row_for_dataset(self, row):
         result = row[:-1]
-        result.ins
-
-
+        y_val = row[-1]
+        last_period = row[-2]
+        val = int
+        if len(set(y_val) & set(last_period)) == 3:
+            val = 0
+        else:
+            val = 1
+        result.insert(0, val)
+        return result
 
 
 def create_final_data():
