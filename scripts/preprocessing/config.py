@@ -33,7 +33,7 @@ class CreatingDatasets:
     WINDOW_SIZE = 5
     # 317 positions -> samples_num * 317 positions -> final number of rows
     # SAMPLES_NUM_PER_POS = 1000
-    SAMPLES_NUM_PER_POS = 100
+    SAMPLES_NUM_PER_POS = 10
     # TODO: later can be done, for now just randomly
     # STRATEGY = 'single_epitope'
     # ANALYZED_EPITOPE = 194

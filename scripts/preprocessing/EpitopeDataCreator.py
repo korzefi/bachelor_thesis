@@ -8,6 +8,7 @@ from scripts.preprocessing.config import CreatingDatasets, Clustering
 
 
 class EpitopeDataCreator:
+    CONTEXT_SIZE = 2
     def __init__(self, window_size=CreatingDatasets.WINDOW_SIZE):
         self.window_size = window_size
         self.epitopes_positions = self.__parse_epitope_positions(CreatingDatasets.EPITOPES)
@@ -16,11 +17,13 @@ class EpitopeDataCreator:
         df = pd.read_csv(Clustering.CLUSTERS_CENTROIDS_DATA_PATH)
         windows = self.__get_windows(df['period'])
         samples = self.__create_samples(df, windows)
-        # TODO: create final data from samples
+        self.__create_final_dataset(samples)
 
     def __parse_epitope_positions(self, epitope_positions):
         epitopes = [list(range(start, end + 1)) for start, end in epitope_positions]
         flat_epitopes = [positions for epitope in epitopes for positions in epitope]
+        # transform positions to list positions (starting from 0)
+        flat_epitopes = list(map(lambda x: x-1, flat_epitopes))
         return flat_epitopes
 
     def __get_windows(self, periods: pd.Series) -> [{}]:
@@ -93,6 +96,62 @@ class EpitopeDataCreator:
         chosen_row = current_cluster_rows.sample()
         seq = chosen_row.iloc[0]['sequence']
         return seq
+
+    def __create_final_dataset(self, samples_seqs):
+        logging.info('Transferring samples into dataset')
+        cut_out_epitopes_samples = self.__cut_out_epitopes_with_context(samples_seqs)
+        transformed_epitopes = self.__transform_to_protvec_positions(cut_out_epitopes_samples)
+        self.__transform_to_datasets(transformed_epitopes)
+
+    def __cut_out_epitopes_with_context(self, sample_seqs) -> [[[]]]:
+        cxt_size = EpitopeDataCreator.CONTEXT_SIZE
+        cut_out_epitopes_samples = []
+        for sample in sample_seqs:
+            new_sample = []
+            for seq in sample:
+                seqs_epitopes = []
+                for position in self.epitopes_positions:
+                    seqs_epitopes.append(seq[position-cxt_size:position+cxt_size+1])
+                new_sample.append(seqs_epitopes)
+            cut_out_epitopes_samples.append(new_sample)
+        return cut_out_epitopes_samples
+
+    def __transform_to_protvec_positions(self, epitopes_samples: [[[]]]) -> [[[[]]]]:
+        protvec = pd.read_csv(Clustering.PROT_VEC_PATH)
+        index_samples = []
+        for count, sample in enumerate(epitopes_samples):
+            logging.info(f'Transfering {count+1} seq out of {CreatingDatasets.SAMPLES_NUM_PER_POS}')
+            new_sample = []
+            for seq in sample:
+                seqs_triplets = []
+                for epitope_cxt in seq:
+                    epitope_triplet_list = self.__epitope_cxt_to_triplet_list(epitope_cxt, protvec)
+                    seqs_triplets.append(epitope_triplet_list)
+                new_sample.append(seqs_triplets)
+            index_samples.append(new_sample)
+        return index_samples
+
+    def __epitope_cxt_to_triplet_list(self, epitope_cxt, protvec):
+        sites_per_pos_num = 1 + (2 * EpitopeDataCreator.CONTEXT_SIZE)
+        triplets_num = sites_per_pos_num - 2
+        triplets = [epitope_cxt[i:i + 3] for i in range(triplets_num)]
+        return [protvec.index[protvec['words'] == triplet].tolist()[0] for triplet in triplets]
+
+    def __transform_to_datasets(self, epitopes_samples):
+        # TODO: create appropriate dataframe here
+        df = pd.DataFrame()
+        for sample in epitopes_samples:
+            seq_len = len(sample[0])
+            for i in range(seq_len):
+                row = []
+                for seq_num, seq in enumerate(sample):
+                    row.append(seq[i])
+
+    def __adjust_row_for_dataset(self, row):
+        result = row[:-1]
+        result.ins
+
+
 
 
 def create_final_data():
