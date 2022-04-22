@@ -1,5 +1,7 @@
 import logging
+
 import pandas as pd
+from sklearn.utils import shuffle
 import random
 
 from natsort import natsorted
@@ -55,7 +57,7 @@ class EpitopeDataCreator:
             for i in range(num_samples_per_window):
                 sequences.append(self.__link_clusters(centroids_df, window))
         for i in range(reminder):
-            sequences.append(self.__link_clusters(centroids_df, windows[0]))
+            sequences.append(self.__link_clusters(centroids_df, windows[-1]))
         return sequences
 
     def __link_clusters(self, centroids_df, window: {}):
@@ -147,7 +149,10 @@ class EpitopeDataCreator:
                     row.append(seq[i])
                 row = self.__adjust_row_for_dataset(row)
                 df.loc[len(df) + 1] = row
-        # TODO: add saving df to file and checking for existence, shuffle all rows
+        filepath = CreatingDatasets.DATASETS_DIR_PATH
+        df = shuffle(df)
+        df.reset_index(drop=True, inplace=True)
+        df.to_csv(filepath, index=False, header=True)
 
     def __create_dataset_dataframe(self):
         columns = ['y']

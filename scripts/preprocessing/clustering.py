@@ -114,7 +114,7 @@ def transform_vectors_multiprocess(first_file_num, last_file_num):
 
 def get_filepath_cluster_dict_for_centroids() -> {}:
     file_cluster_dict = ClusterToProceed.FILES_CLUSTERS_NUM
-    return {f'{Clustering.VECTOR_TEMP_DIR_PATH}/{file}': cluster for file, cluster in file_cluster_dict}
+    return {f'{Clustering.VECTOR_TEMP_DIR_PATH}/{file}': cluster for file, cluster in file_cluster_dict.items()}
 
 
 if __name__ == '__main__':

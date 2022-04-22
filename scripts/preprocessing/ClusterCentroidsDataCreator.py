@@ -39,7 +39,7 @@ class ClusterDataCreator:
         filepath = Clustering.CLUSTERS_CENTROIDS_DATA_PATH
         if os.path.exists(filepath):
             return
-        columns = ClusterDataCreator.__create_columns_headers(self)
+        columns = self.__create_columns_headers(self)
         df = pd.DataFrame(columns=columns)
         df.to_csv(filepath, index=False, header=True)
 
@@ -53,4 +53,4 @@ class ClusterDataCreator:
 def create_centroids_data(filepath_cluster_dict: {}, modify_file=False):
     creator = ClusterDataCreator()
     for file, cluster in filepath_cluster_dict.items():
-        creator.create_centroids_data(file, creator, modify_file)
+        creator.create_centroids_data(filepath=file, n_clusters=cluster, modify_file=modify_file)

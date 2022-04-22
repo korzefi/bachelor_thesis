@@ -12,8 +12,8 @@ class ClusterLinker:
         logging.info('Linking clusters')
         filepath = Clustering.CLUSTERS_CENTROIDS_DATA_PATH
         df = pd.read_csv(filepath)
-        sorted_df = ClusterLinker.__sort_centroids(df)
-        next_clusters_links = ClusterLinker.__get_links(sorted_df)
+        sorted_df = self.__sort_centroids(df)
+        next_clusters_links = self.__get_links(sorted_df)
         sorted_df.drop(['next_cluster'], axis=1, inplace=True, errors='ignore')
         sorted_df.insert(loc=2, column='next_cluster', value=next_clusters_links)
         sorted_df.to_csv(filepath, index=False)

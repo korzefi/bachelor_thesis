@@ -4,10 +4,10 @@ from scripts.clustering.config import MakingClusters
 from scripts.clustering.ClusterCreator import ClusterCreator, ClusterMethodFactory
 from scripts.clustering.visualization import ReductionMethodFactory, plot_clusters, plot_elbow_method
 
-FILENAME_TO_BE_PROCEED = '2020-12.csv'
+FILENAME_TO_BE_PROCEED = '2021-12.csv'
 USE_RANGE_CLUSTERS = False
 # this will be skipped if USE_RANGE_CLUSTERS is set, otherwise there will be only N_CLUSTERS version created
-N_CLUSTERS = 7
+N_CLUSTERS = 17
 SAVE_FIG = True
 
 
