@@ -44,8 +44,9 @@ Clustering is done using K-means and to visualization - PCA and t-sne reduction 
 
 Maybe it is good to do some double filtration when creating final dataset. Now - there are sequences taken randomly
 accordingly to the clusters created but it can be noticed that some sequences are totally different - have all epitopes
-mutated. Maybe there should be set some **threshold** standing for the % of mutated values relating to the previous
-sequence. If the threshold is passed, for the sequence, the sequence is neglected then and new sequence is picked.
+mutated. **This may indicate that they were not exactly properly clustered.** Maybe there should be set some 
+**threshold** standing for the % of mutated values relating to the previous sequence. If the threshold is passed, for the sequence,
+the sequence is neglected then and new sequence is picked.
 
 ##### Example
 
