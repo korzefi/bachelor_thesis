@@ -25,7 +25,7 @@ window = 10 periods by default => means 10 columns of sequences and y column is 
 
 Clustering is done using K-means and to visualization - PCA and t-sne reduction methods.
 
-### TODO
+### CREATING FINAL DATA
 
 - add cluster column for files in periods/unique representing num of cluster it belongs to (indexing from 0) - for this
   case data need to be clustered again (do not need to be visualized) and the corresponding labels have to be added as a
@@ -39,3 +39,16 @@ Clustering is done using K-means and to visualization - PCA and t-sne reduction 
   numbers [num1, num2, num3]
 
 1 row taken from clusters gives 317 positions data, only 1000 unique rows must be taken then
+
+### To think of
+
+Maybe it is good to do some double filtration when creating final dataset. Now - there are sequences taken randomly
+accordingly to the clusters created but it can be noticed that some sequences are totally different - have all epitopes
+mutated. Maybe there should be set some **threshold** standing for the % of mutated values relating to the previous
+sequence. If the threshold is passed, for the sequence, the sequence is neglected then and new sequence is picked.
+
+##### Example
+
+We have 2 consecutive sequences (from consequtive periods) that are picked to be linked and the threshold 50%. If the
+sequence from period *i+1* has different values for over 50% of all epitopes than the sequence from period *i*, new
+sequence (from period *i+1*) should be chosen and checked with the same criterion.
