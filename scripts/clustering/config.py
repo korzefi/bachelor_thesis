@@ -17,7 +17,7 @@ class MakingClusters:
 class KMeansConfig:
     """N_ITERATIONS_INIT - number of iterations with random initializations of centroids,
         where the one with the smallest distortion (cost function) is picked"""
-    N_ITERATIONS_INIT = 1000
+    N_ITERATIONS_INIT = 3000
     MAX_ITER = 500
 
 

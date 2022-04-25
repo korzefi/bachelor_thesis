@@ -119,8 +119,8 @@ def get_filepath_cluster_dict_for_centroids() -> {}:
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    # filepath_clusters_data = get_filepath_cluster_dict_for_centroids()
-    # ClusterCentroidsDataCreator.create_centroids_data(filepath_cluster_dict=filepath_clusters_data, modify_file=True)
+    filepath_clusters_data = get_filepath_cluster_dict_for_centroids()
+    ClusterCentroidsDataCreator.create_centroids_data(filepath_cluster_dict=filepath_clusters_data, modify_file=True)
     # ClusterLinker.link()
-    EpitopeDataCreator.create_final_data()
+    # EpitopeDataCreator.create_final_data()
 

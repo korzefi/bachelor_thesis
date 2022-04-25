@@ -39,7 +39,7 @@ class ClusterDataCreator:
         filepath = Clustering.CLUSTERS_CENTROIDS_DATA_PATH
         if os.path.exists(filepath):
             return
-        columns = self.__create_columns_headers(self)
+        columns = self.__create_columns_headers()
         df = pd.DataFrame(columns=columns)
         df.to_csv(filepath, index=False, header=True)
 
