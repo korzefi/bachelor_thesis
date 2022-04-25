@@ -9,11 +9,24 @@ from natsort import natsorted
 from scripts.preprocessing.config import CreatingDatasets, Clustering
 
 
+class SequencesBatchToMutated(Exception):
+    def __init__(self, message="Could not find sequences fulfilling threshold criterion"):
+        self.message = message
+        super().__init__(self.message)
+
+    def __str__(self):
+        return self.message
+
+
 class EpitopeDataCreator:
     CONTEXT_SIZE = 2
-    def __init__(self, window_size=CreatingDatasets.WINDOW_SIZE):
+
+    def __init__(self,
+                 window_size=CreatingDatasets.WINDOW_SIZE,
+                 threshold=CreatingDatasets.EPITOPES_SIMILARITY_THRESHOLD):
         self.window_size = window_size
         self.epitopes_positions = self.__parse_epitope_positions(CreatingDatasets.EPITOPES)
+        self.max_similar_epitopes = int(len(self.epitopes_positions) * threshold)
 
     def create_data(self):
         df = pd.read_csv(Clustering.CLUSTERS_CENTROIDS_DATA_PATH)
@@ -25,7 +38,7 @@ class EpitopeDataCreator:
         epitopes = [list(range(start, end + 1)) for start, end in epitope_positions]
         flat_epitopes = [positions for epitope in epitopes for positions in epitope]
         # transform positions to list positions (starting from 0)
-        flat_epitopes = list(map(lambda x: x-1, flat_epitopes))
+        flat_epitopes = list(map(lambda x: x - 1, flat_epitopes))
         return flat_epitopes
 
     def __get_windows(self, periods: pd.Series) -> [{}]:
@@ -43,7 +56,6 @@ class EpitopeDataCreator:
         for i in range(windows_num):
             result.append({'x': sorted_unique_periods[i:i + self.window_size]})
             result[i]['y'] = sorted_unique_periods[i + self.window_size]
-
         return result
 
     def __create_samples(self, centroids_df, windows):
@@ -61,11 +73,16 @@ class EpitopeDataCreator:
         return sequences
 
     def __link_clusters(self, centroids_df, window: {}):
-        first_seq_dict = self.__choose_first(centroids_df, window)
-        next_clusters = first_seq_dict['next_clusters']
-        chosen_cluster = random.choice(next_clusters)
-        rest_seqs = self.__link_rest_clusters(centroids_df, chosen_cluster, window)
-        return [first_seq_dict['seq']] + rest_seqs
+        result = []
+        mutated_to_much = True
+        while mutated_to_much:
+            try:
+                first_seq_dict = self.__choose_first(centroids_df, window)
+                result = self.__link_rest_clusters(centroids_df, first_seq_dict, window)
+                mutated_to_much = False
+            except SequencesBatchToMutated:
+                mutated_to_much = True
+        return result
 
     def __choose_first(self, centroids_df, window: {}):
         first_period_str = window['x'][0]
@@ -75,15 +92,23 @@ class EpitopeDataCreator:
         seq = self.__get_sequence(f'{first_period_str}.csv', current_cluster)
         return {'seq': seq, 'next_clusters': next_clusters}
 
-    def __link_rest_clusters(self, centroids_df, chosen_cluster, window):
-        result = []
-        current_cluster = chosen_cluster
+    def __link_rest_clusters(self, centroids_df, first_seq_dict, window):
+        result = [first_seq_dict['seq']]
+        next_clusters = first_seq_dict['next_clusters']
+        current_cluster = random.choice(next_clusters)
         for i in range(1, len(window['x'])):
             current_period_str = window['x'][i]
             next_clusters_row = centroids_df[(centroids_df['period'] == current_period_str) &
                                              (centroids_df['cluster'] == int(current_cluster))]
             next_clusters = next_clusters_row.iloc[0]['next_cluster'].split('-')
             seq = self.__get_sequence(f'{current_period_str}.csv', int(current_cluster))
+            prev_seq = result[-1]
+            max_tries_num_count = 0
+            while self.__is_mutated_to_much(prev_seq, seq):
+                max_tries_num_count += 1
+                seq = self.__get_sequence(f'{current_period_str}.csv', int(current_cluster))
+                if max_tries_num_count > 10:
+                    raise SequencesBatchToMutated
             result.append(seq)
             current_cluster = random.choice(next_clusters)
         current_period_str = window['y']
@@ -92,12 +117,23 @@ class EpitopeDataCreator:
         return result
 
     def __get_sequence(self, filename, current_cluster):
+        expected_seq_len_with_asterisk = 1274
         filepath = f'{Clustering.DATA_PERIODS_UNIQUE_PATH}/{filename}'
         df = pd.read_csv(filepath)
-        current_cluster_rows = df[df['cluster'] == current_cluster]
+        current_cluster_rows = df[(df['cluster'] == current_cluster) &
+                                  (df['sequence'].str.len() == expected_seq_len_with_asterisk)]
+        if current_cluster_rows.empty:
+            current_cluster_rows = df[df['cluster'] == current_cluster]
         chosen_row = current_cluster_rows.sample()
         seq = chosen_row.iloc[0]['sequence']
         return seq
+
+    def __is_mutated_to_much(self, prev_seq, seq):
+        mutated_epitopes = 0
+        for pos in self.epitopes_positions:
+            if prev_seq[pos] != seq[pos]:
+                mutated_epitopes += 1
+        return mutated_epitopes > self.max_similar_epitopes
 
     def __create_final_dataset(self, samples_seqs):
         logging.info('Transferring samples into dataset')
@@ -113,7 +149,7 @@ class EpitopeDataCreator:
             for seq in sample:
                 seqs_epitopes = []
                 for position in self.epitopes_positions:
-                    seqs_epitopes.append(seq[position-cxt_size:position+cxt_size+1])
+                    seqs_epitopes.append(seq[position - cxt_size:position + cxt_size + 1])
                 new_sample.append(seqs_epitopes)
             cut_out_epitopes_samples.append(new_sample)
         return cut_out_epitopes_samples
@@ -122,7 +158,7 @@ class EpitopeDataCreator:
         protvec = pd.read_csv(Clustering.PROT_VEC_PATH)
         index_samples = []
         for count, sample in enumerate(epitopes_samples):
-            logging.info(f'Transfering {count+1} seq out of {CreatingDatasets.SAMPLES_NUM_PER_POS}')
+            logging.info(f'Transfering {count + 1} seq out of {CreatingDatasets.SAMPLES_NUM_PER_POS}')
             new_sample = []
             for seq in sample:
                 seqs_triplets = []
@@ -140,8 +176,11 @@ class EpitopeDataCreator:
         return [protvec.index[protvec['words'] == triplet].tolist()[0] for triplet in triplets]
 
     def __transform_to_datasets(self, epitopes_samples):
+        logging.info('Transforming samples to datasets')
         df = self.__create_dataset_dataframe()
-        for sample in epitopes_samples:
+        epitopes_samples_num = len(epitopes_samples)
+        for counter, sample in enumerate(epitopes_samples):
+            logging.info(f'Processing {counter + 1} sample out of {epitopes_samples_num}')
             seq_len = len(sample[0])
             for i in range(seq_len):
                 row = []
@@ -150,9 +189,11 @@ class EpitopeDataCreator:
                 row = self.__adjust_row_for_dataset(row)
                 df.loc[len(df) + 1] = row
         filepath = CreatingDatasets.DATASETS_DIR_PATH
+        logging.info('Dataset created, shuffling data...')
         df = shuffle(df)
         df.reset_index(drop=True, inplace=True)
         df.to_csv(filepath, index=False, header=True)
+        logging.info(f'Dataset saved to {filepath}')
 
     def __create_dataset_dataframe(self):
         columns = ['y']

@@ -40,7 +40,7 @@ Clustering is done using K-means and to visualization - PCA and t-sne reduction 
 
 1 row taken from clusters gives 317 positions data, only 1000 unique rows must be taken then
 
-### To think of
+### epitopes_similarity_threshold parameter in scripts.preprocessing.config
 
 Maybe it is good to do some double filtration when creating final dataset. Now - there are sequences taken randomly
 accordingly to the clusters created but it can be noticed that some sequences are totally different - have all epitopes

@@ -27,13 +27,15 @@ class Clustering:
 class CreatingDatasets:
     """epitopes - list of positions: [(<beginning epitope position>, <end epitope position>)]
        window_size - number of consecutive clusters to be linked
-       sample_num_per_pos - number of samples to be generated per epitope position"""
+       sample_num_per_pos - number of samples to be generated per epitope position
+       epitopes_similarity_threshold - threshold over which sequences are replaced - check readme"""
     EPITOPES = [(194, 210), (291, 325), (307, 323), (371, 387), (410, 426), (525, 566), (530, 544), (722, 739),
                 (747, 763), (749, 771), (754, 770), (891, 906), (897, 913), (1101, 1115), (1129, 1145), (1213, 1229)]
-    WINDOW_SIZE = 10
+    WINDOW_SIZE = 5
     # 317 positions -> samples_num * 317 positions -> final number of rows
-    SAMPLES_NUM_PER_POS = 1000
-    # SAMPLES_NUM_PER_POS = 20
+    # SAMPLES_NUM_PER_POS = 1000
+    SAMPLES_NUM_PER_POS = 10
+    EPITOPES_SIMILARITY_THRESHOLD = 0.4
     # TODO: later can be done, for now just randomly
     # STRATEGY = 'single_epitope'
     # ANALYZED_EPITOPE = 194
@@ -42,7 +44,7 @@ class CreatingDatasets:
 
 class ClusterToProceed:
     FILES_CLUSTERS_NUM = {'2020-2.csv': 2, '2020-3.csv': 2, '2020-4.csv': 2,
-                          '2020-5.csv': 2, '2020-6.csv': 2, '2020-7.csv': 2, '2020-8.csv': 3, '2020-9.csv': 4,
+                          '2020-5.csv': 2, '2020-6.csv': 2, '2020-7.csv': 3, '2020-8.csv': 3, '2020-9.csv': 4,
                           '2020-10.csv': 4, '2020-11.csv': 5, '2020-12.csv': 6, '2021-1.csv': 7, '2021-2.csv': 8,
                           '2021-3.csv': 8, '2021-4.csv': 8, '2021-5.csv': 9, '2021-6.csv': 10, '2021-7.csv': 11,
                           '2021-8.csv': 11, '2021-9.csv': 12, '2021-10.csv': 14, '2021-11.csv': 15, '2021-12.csv': 16}
