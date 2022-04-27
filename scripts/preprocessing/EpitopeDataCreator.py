@@ -1,4 +1,5 @@
 import logging
+import multiprocessing
 
 import pandas as pd
 from sklearn.utils import shuffle
@@ -23,16 +24,12 @@ class EpitopeDataCreator:
 
     def __init__(self,
                  window_size=CreatingDatasets.WINDOW_SIZE,
-                 threshold=CreatingDatasets.EPITOPES_SIMILARITY_THRESHOLD):
-        self.window_size = window_size
-        self.epitopes_positions = self.__parse_epitope_positions(CreatingDatasets.EPITOPES)
-        self.max_similar_epitopes = int(len(self.epitopes_positions) * threshold)
-
-    def create_data(self):
-        df = pd.read_csv(Clustering.CLUSTERS_CENTROIDS_DATA_PATH)
-        windows = self.__get_windows(df['period'])
-        samples = self.__create_samples(df, windows)
-        self.__create_final_dataset(samples)
+                 threshold=CreatingDatasets.EPITOPES_SIMILARITY_THRESHOLD,
+                 dataset_size=CreatingDatasets.DATASET_SIZE):
+        self.dataset_size = dataset_size
+        self.__window_size = window_size
+        self.__epitopes_positions = self.__parse_epitope_positions(CreatingDatasets.EPITOPES)
+        self.__max_similar_epitopes = int(len(self.__epitopes_positions) * threshold)
 
     def __parse_epitope_positions(self, epitope_positions):
         epitopes = [list(range(start, end + 1)) for start, end in epitope_positions]
@@ -41,26 +38,38 @@ class EpitopeDataCreator:
         flat_epitopes = list(map(lambda x: x - 1, flat_epitopes))
         return flat_epitopes
 
+    def set_dataset_size(self, dataset_size):
+        self.dataset_size = dataset_size
+
+    def create_data(self):
+        df = pd.read_csv(Clustering.CLUSTERS_CENTROIDS_DATA_PATH)
+        windows = self.__get_windows(df['period'])
+        samples = self.__create_samples(df, windows)
+        df = self.__create_final_dataset(samples)
+        return df
+
     def __get_windows(self, periods: pd.Series) -> [{}]:
         periods_num = periods.nunique()
         unique_periods = periods.unique()
         sorted_unique_periods = natsorted(unique_periods)
         # 1 due to the y column
-        dataset_row_len = self.window_size + 1
+        dataset_row_len = self.__window_size + 1
         if periods_num < dataset_row_len:
             logging.warning('Periods number is lower than given window size')
             logging.warning(f'Window size is set for periods_num = {periods_num}')
-            self.window_size = periods_num - 1
-        windows_num = periods_num - self.window_size
+            self.__window_size = periods_num - 1
+        windows_num = periods_num - self.__window_size
         result = []
         for i in range(windows_num):
-            result.append({'x': sorted_unique_periods[i:i + self.window_size]})
-            result[i]['y'] = sorted_unique_periods[i + self.window_size]
+            result.append({'x': sorted_unique_periods[i:i + self.__window_size]})
+            result[i]['y'] = sorted_unique_periods[i + self.__window_size]
         return result
 
     def __create_samples(self, centroids_df, windows):
-        num_samples_per_window = CreatingDatasets.SAMPLES_NUM_PER_POS // len(windows)
-        reminder = CreatingDatasets.SAMPLES_NUM_PER_POS - len(windows) * num_samples_per_window
+        epitopes_pos_num = 317
+        samples_num_per_pos = self.dataset_size // epitopes_pos_num
+        num_samples_per_window = samples_num_per_pos // len(windows)
+        reminder = samples_num_per_pos - len(windows) * num_samples_per_window
         # 1st need to be chosen randomly (random cluster),
         # next from x, and y need to be taken accordingly to pattern (link)
         sequences = []
@@ -130,16 +139,17 @@ class EpitopeDataCreator:
 
     def __is_mutated_to_much(self, prev_seq, seq):
         mutated_epitopes = 0
-        for pos in self.epitopes_positions:
+        for pos in self.__epitopes_positions:
             if prev_seq[pos] != seq[pos]:
                 mutated_epitopes += 1
-        return mutated_epitopes > self.max_similar_epitopes
+        return mutated_epitopes > self.__max_similar_epitopes
 
     def __create_final_dataset(self, samples_seqs):
         logging.info('Transferring samples into dataset')
         cut_out_epitopes_samples = self.__cut_out_epitopes_with_context(samples_seqs)
         transformed_epitopes = self.__transform_to_protvec_positions(cut_out_epitopes_samples)
-        self.__transform_to_datasets(transformed_epitopes)
+        df = self.__transform_to_datasets(transformed_epitopes)
+        return df
 
     def __cut_out_epitopes_with_context(self, sample_seqs) -> [[[]]]:
         cxt_size = EpitopeDataCreator.CONTEXT_SIZE
@@ -148,17 +158,19 @@ class EpitopeDataCreator:
             new_sample = []
             for seq in sample:
                 seqs_epitopes = []
-                for position in self.epitopes_positions:
+                for position in self.__epitopes_positions:
                     seqs_epitopes.append(seq[position - cxt_size:position + cxt_size + 1])
                 new_sample.append(seqs_epitopes)
             cut_out_epitopes_samples.append(new_sample)
         return cut_out_epitopes_samples
 
     def __transform_to_protvec_positions(self, epitopes_samples: [[[]]]) -> [[[[]]]]:
+        epitopes_pos_num = 317
+        samples_num_per_pos = self.dataset_size // epitopes_pos_num
         protvec = pd.read_csv(Clustering.PROT_VEC_PATH)
         index_samples = []
         for count, sample in enumerate(epitopes_samples):
-            logging.info(f'Transfering {count + 1} seq out of {CreatingDatasets.SAMPLES_NUM_PER_POS}')
+            logging.info(f'Transfering {count + 1} seq out of {samples_num_per_pos}')
             new_sample = []
             for seq in sample:
                 seqs_triplets = []
@@ -192,12 +204,11 @@ class EpitopeDataCreator:
         logging.info('Dataset created, shuffling data...')
         df = shuffle(df)
         df.reset_index(drop=True, inplace=True)
-        df.to_csv(filepath, index=False, header=True)
-        logging.info(f'Dataset saved to {filepath}')
+        return df
 
     def __create_dataset_dataframe(self):
         columns = ['y']
-        columns_x = [str(i) for i in range(self.window_size)]
+        columns_x = [str(i) for i in range(self.__window_size)]
         columns += columns_x
         df = pd.DataFrame(columns=columns)
         df.reset_index(drop=True, inplace=True)
@@ -216,6 +227,83 @@ class EpitopeDataCreator:
         return result
 
 
+class DatasetRefiller:
+    MAX_ITERS = 10
+    PROCESSES_NUM = 20
+
+    def __init__(self,
+                 epitope_creator: EpitopeDataCreator,
+                 duplicated_data_ratio=CreatingDatasets.DUPLICATED_DATA_RATIO):
+        self.__creator = epitope_creator
+        self.__duplicated_data_ratio = duplicated_data_ratio
+        self.duplicates_subset = [str(i) for i in range(CreatingDatasets.WINDOW_SIZE)]
+
+    def create_dataset(self):
+        logging.info('Creating final dataset using refiller')
+        filepath = CreatingDatasets.DATASETS_DIR_PATH
+        df = self.__creator.create_data()
+        df.reset_index(drop=True, inplace=True)
+        df.to_csv(filepath, index=False)
+        logging.info(f'1 of {DatasetRefiller.MAX_ITERS} iteration complete')
+        for i in range(DatasetRefiller.MAX_ITERS - 1):
+            df.drop_duplicates(subset=self.duplicates_subset, inplace=True)
+            df.reset_index(drop=True, inplace=True)
+            new_dataset_size = CreatingDatasets.DATASET_SIZE - len(df)
+            self.__creator.set_dataset_size(new_dataset_size)
+            new_batch = self.__creator.create_data()
+            df = pd.concat([df, new_batch], ignore_index=True)
+            df.reset_index(drop=True, inplace=True)
+            df.to_csv(filepath, index=False)
+            total_dataset_size = CreatingDatasets.DATASET_SIZE
+            df_no_duplicates = df.drop_duplicates(subset=self.duplicates_subset, inplace=False)
+            actual_ratio = (len(df_no_duplicates) * 100) / total_dataset_size
+            logging.info(f'{i+2} iteration of {DatasetRefiller.MAX_ITERS} iteration complete')
+            logging.info(f'Duplicated ratio: {actual_ratio}')
+            if actual_ratio > self.__duplicated_data_ratio:
+                logging.info('Duplicated ratio achieved')
+                return
+
+    def create_datasets_multiprocess(self):
+        processes = []
+        for i in range(DatasetRefiller.PROCESSES_NUM):
+            p = multiprocessing.Process(target=self._create_dataset_file, args=(i,))
+            p.start()
+            processes.append(p)
+
+        for p in processes:
+            p.join()
+
+        self.__merge_dataset_files()
+
+    def _create_dataset_file(self, process_num):
+        logging.basicConfig(level=logging.INFO)
+
+        filepath = CreatingDatasets.DATASETS_DIR_PATH
+        filepath = filepath[:-4] + f'-{process_num}.csv'
+        df = self.__creator.create_data()
+        df.to_csv(filepath, index=False)
+        logging.info(f'Creating file for {process_num} process finished')
+
+    def __merge_dataset_files(self):
+        filepath = CreatingDatasets.DATASETS_DIR_PATH
+        filepath = filepath[:-4] + '-0.csv'
+        df = pd.read_csv(filepath)
+        df.drop_duplicates(subset=self.duplicates_subset, inplace=True)
+        df.reset_index(drop=True, inplace=True)
+        for i in range(1, DatasetRefiller.PROCESSES_NUM):
+            filepath = CreatingDatasets.DATASETS_DIR_PATH
+            filepath = filepath[:-4] + f'-{i}.csv'
+            current_df = pd.read_csv(filepath)
+            df = pd.concat([df, current_df], ignore_index=True)
+            df.drop_duplicates(subset=self.duplicates_subset, inplace=True)
+            df.reset_index(drop=True, inplace=True)
+        output_filepath = CreatingDatasets.DATASETS_DIR_PATH
+        output_filepath = output_filepath[:-4] + '-multiprocess.csv'
+        df.to_csv(output_filepath, index=False)
+
+
 def create_final_data():
-    creator = EpitopeDataCreator()
-    creator.create_data()
+    epitope_creator = EpitopeDataCreator()
+    dataset_creator = DatasetRefiller(epitope_creator=epitope_creator)
+    # dataset_creator.create_dataset()
+    dataset_creator.create_datasets_multiprocess()

@@ -43,13 +43,18 @@ Clustering is done using K-means and to visualization - PCA and t-sne reduction 
 ### epitopes_similarity_threshold parameter in scripts.preprocessing.config
 
 Maybe it is good to do some double filtration when creating final dataset. Now - there are sequences taken randomly
-accordingly to the clusters created but it can be noticed that some sequences are totally different - have all epitopes
+accordingly to the clusters created, but it can be noticed that some sequences are totally different - have all epitopes
 mutated. **This may indicate that they were not exactly properly clustered.** Maybe there should be set some 
 **threshold** standing for the % of mutated values relating to the previous sequence. If the threshold is passed, for the sequence,
 the sequence is neglected then and new sequence is picked.
 
 ##### Example
 
-We have 2 consecutive sequences (from consequtive periods) that are picked to be linked and the threshold 50%. If the
+We have 2 consecutive sequences (from consecutive periods) that are picked to be linked and the threshold 50%. If the
 sequence from period *i+1* has different values for over 50% of all epitopes than the sequence from period *i*, new
 sequence (from period *i+1*) should be chosen and checked with the same criterion.
+
+
+### Doubts
+
+Maybe it would be better if unique sequences be done on whole FASTA datafile instead of periodic ones
