@@ -38,12 +38,13 @@ class CreatingDatasets:
     DUPLICATED_DATA_RATIO = 0.2
     WINDOW_SIZE = 10
     # 317 positions -> samples_num * 317 positions -> final number of rows
-    DATASET_SIZE = 3170000
+    DATASET_SIZE = 634000
     EPITOPES_SIMILARITY_THRESHOLD = 0.5
     # TODO: later can be done, for now just randomly
     # STRATEGY = 'single_epitope'
     # ANALYZED_EPITOPE = 194
-    DATASETS_DIR_PATH = f'{GroupingRawData.DATA_PARENT_PATH}/datasets/period-{GroupingRawData.DIVISION_TECHNIQUE}.csv'
+    DATASETS_MAIN_FILE_PATH = f'{GroupingRawData.DATA_PARENT_PATH}/datasets/period-{GroupingRawData.DIVISION_TECHNIQUE}.csv'
+    DATASETS_DIR_PATH = f'{GroupingRawData.DATA_PARENT_PATH}/datasets'
 
 
 class ClusterToProceed:

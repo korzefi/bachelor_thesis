@@ -1,5 +1,6 @@
 import logging
 import multiprocessing
+import os
 
 import pandas as pd
 from sklearn.utils import shuffle
@@ -7,7 +8,7 @@ import random
 
 from natsort import natsorted
 
-from scripts.preprocessing.config import CreatingDatasets, Clustering
+from scripts.preprocessing.config import CreatingDatasets, Clustering, GroupingRawData
 
 
 class SequencesBatchToMutated(Exception):
@@ -200,7 +201,7 @@ class EpitopeDataCreator:
                     row.append(seq[i])
                 row = self.__adjust_row_for_dataset(row)
                 df.loc[len(df) + 1] = row
-        filepath = CreatingDatasets.DATASETS_DIR_PATH
+        filepath = CreatingDatasets.DATASETS_MAIN_FILE_PATH
         logging.info('Dataset created, shuffling data...')
         df = shuffle(df)
         df.reset_index(drop=True, inplace=True)
@@ -240,7 +241,7 @@ class DatasetRefiller:
 
     def create_dataset(self):
         logging.info('Creating final dataset using refiller')
-        filepath = CreatingDatasets.DATASETS_DIR_PATH
+        filepath = CreatingDatasets.DATASETS_MAIN_FILE_PATH
         df = self.__creator.create_data()
         df.reset_index(drop=True, inplace=True)
         df.to_csv(filepath, index=False)
@@ -275,10 +276,13 @@ class DatasetRefiller:
 
         self.__merge_dataset_files()
 
+    def merge_files(self):
+        self.__merge_dataset_files()
+
     def _create_dataset_file(self, process_num):
         logging.basicConfig(level=logging.INFO)
 
-        filepath = CreatingDatasets.DATASETS_DIR_PATH
+        filepath = CreatingDatasets.DATASETS_MAIN_FILE_PATH
         filepath = filepath[:-4] + f'-{process_num}.csv'
         df = self.__creator.create_data()
         df.to_csv(filepath, index=False)
@@ -286,19 +290,18 @@ class DatasetRefiller:
 
     def __merge_dataset_files(self):
         filepath = CreatingDatasets.DATASETS_DIR_PATH
-        filepath = filepath[:-4] + '-0.csv'
-        df = pd.read_csv(filepath)
+        periods = os.listdir(filepath)
+        periods = list(map(lambda x: f'{CreatingDatasets.DATASETS_DIR_PATH}/{x}', periods))
+        df = pd.read_csv(periods[0])
         df.drop_duplicates(subset=self.duplicates_subset, inplace=True)
         df.reset_index(drop=True, inplace=True)
-        for i in range(1, DatasetRefiller.PROCESSES_NUM):
-            filepath = CreatingDatasets.DATASETS_DIR_PATH
-            filepath = filepath[:-4] + f'-{i}.csv'
-            current_df = pd.read_csv(filepath)
+        periods = periods[1:]
+        for filename in periods:
+            current_df = pd.read_csv(filename)
             df = pd.concat([df, current_df], ignore_index=True)
             df.drop_duplicates(subset=self.duplicates_subset, inplace=True)
             df.reset_index(drop=True, inplace=True)
-        output_filepath = CreatingDatasets.DATASETS_DIR_PATH
-        output_filepath = output_filepath[:-4] + '-multiprocess.csv'
+        output_filepath = f'{CreatingDatasets.DATASETS_DIR_PATH}/period-month-concat.csv'
         df.to_csv(output_filepath, index=False)
 
 
@@ -306,4 +309,5 @@ def create_final_data():
     epitope_creator = EpitopeDataCreator()
     dataset_creator = DatasetRefiller(epitope_creator=epitope_creator)
     # dataset_creator.create_dataset()
-    dataset_creator.create_datasets_multiprocess()
+    # dataset_creator.create_datasets_multiprocess()
+    dataset_creator.merge_files()
