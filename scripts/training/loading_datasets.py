@@ -48,7 +48,7 @@ def load_dataset(filepath):
     dataset_path = filepath
     df = pd.read_csv(dataset_path)
 
-    # TODO: for sure .values here? - .values orders it in columns instead of rows (without .values)
+    # label of the 'y' column is just removed here
     labels = df['y'].values
 
     # 3-dim array: [sample][period][trigram_as_string]

@@ -245,11 +245,11 @@ def train_rnn(model, verify, epochs, learning_rate, batch_size, X, Y, X_test, Y_
     """
     Training loop for a model utilizing hidden states.
 
-    verify enables sanity checks of the model.
-    epochs decides the number of training iterations.
-    learning rate decides how much the weights are updated each iteration.
-    batch_size decides how many examples are in each mini batch.
-    show_attention decides if attention weights are plotted.
+    verify - enables sanity checks of the model
+    epochs - decides the number of training iterations
+    learning rate - decides how much the weights are updated each iteration.
+    batch_size - decides how many examples are in each mini batch.
+    show_attention - decides if attention weights are plotted.
     """
     print_interval = 10
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)

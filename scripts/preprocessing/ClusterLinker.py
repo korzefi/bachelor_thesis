@@ -87,6 +87,11 @@ class ClusterLinker:
         self.__transform_forward_links_to_lists(forward_links)
         self.__reverse_backward_links(backward_links)
 
+    def __transform_forward_links_to_lists(self, forward_links):
+        temp = {k: [v] for k, v in forward_links.items()}
+        forward_links.clear()
+        forward_links.update(temp)
+
     def __reverse_backward_links(self, backward_links):
         temp = {}
         for key, value in backward_links.items():
@@ -96,11 +101,6 @@ class ClusterLinker:
                 temp[value] = [key]
         backward_links.clear()
         backward_links.update(temp)
-
-    def __transform_forward_links_to_lists(self, forward_links):
-        temp = {k: [v] for k, v in forward_links.items()}
-        forward_links.clear()
-        forward_links.update(temp)
 
     def __get_clusters_values(self, clusters_data, combined_idx_links):
         clusters = self.__transform_to_clusters(clusters_data, combined_idx_links)

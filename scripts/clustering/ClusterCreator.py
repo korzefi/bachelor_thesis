@@ -22,7 +22,9 @@ class KMeansMethod(ClusterMethod):
     def _execute(self, period_vec_data, n_clusters) -> {}:
         # by the supplementary it is changed by user in each year using Elbow method
         all_jobs_activated = -1
-        clf = KMeans(n_clusters=n_clusters, n_init=KMeansConfig.N_ITERATIONS_INIT, max_iter=KMeansConfig.MAX_ITER)
+        clf = KMeans(n_clusters=n_clusters,
+                     n_init=KMeansConfig.N_ITERATIONS_INIT,
+                     max_iter=KMeansConfig.MAX_ITER)
         clf.fit(period_vec_data)
         labels = clf.labels_
         centroids = clf.cluster_centers_

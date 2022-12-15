@@ -6,9 +6,11 @@ from scripts.clustering.making_clusters import ClusterCreatorFactory
 
 
 class ClusterDataCreator:
+    def __init__(self):
+        self.__cluster_creator = ClusterCreatorFactory.create()
+
     def create_centroids_data(self, filepath, n_clusters, modify_file=False):
-        cluster_creator = ClusterCreatorFactory.create()
-        clusters = cluster_creator.create_clusters(filepath=filepath, use_range=False, n_clusters=n_clusters)
+        clusters = self.__cluster_creator.create_clusters(filepath=filepath, use_range=False, n_clusters=n_clusters)
         filename = filepath.split('/')[-1]
         if modify_file:
             self.__add_cluster_column(filename, clusters['labels'])
@@ -53,4 +55,6 @@ class ClusterDataCreator:
 def create_centroids_data(filepath_cluster_dict: {}, modify_file=False):
     creator = ClusterDataCreator()
     for file, cluster in filepath_cluster_dict.items():
-        creator.create_centroids_data(filepath=file, n_clusters=cluster, modify_file=modify_file)
+        creator.create_centroids_data(filepath=file,
+                                      n_clusters=cluster,
+                                      modify_file=modify_file)
