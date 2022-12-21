@@ -1,7 +1,9 @@
 from scripts.training.config import LoadingDatasetsConfig, NetParameters
 from scripts.utils import get_root_path
-from scripts.training import DaRnnModel
 from scripts.training.loading_datasets import load_dataset
+
+from scripts.training import net_utils
+from scripts.training import models
 
 import sys
 import logging
@@ -45,29 +47,31 @@ def train():
     test_counts = max(counts)
     test_imbalance = max(counts) / Y_test.shape[0]
 
-    print('Class imbalances:')
-    print(' Training %.3f' % train_imbalance)
-    print(' Testing  %.3f' % test_imbalance)
+    logging.info('Class imbalances:')
+    logging.info(' Training %.3f' % train_imbalance)
+    logging.info(' Testing  %.3f' % test_imbalance)
 
     input_dim = X_train.shape[2]
     seq_length = X_train.shape[0]
+    # output dim is 2 because of 2 classes: 0 - dim[0] - non-mutated, dim[1] - mutated
     output_dim = 2
 
     logging.info('Creating model')
-    net = DaRnnModel.DaRnnModel(seq_length, input_dim, output_dim)
+    # net = models.DualAttentionRnnModel(seq_length, input_dim, output_dim)
+    net = models.AttentionRnnModel(seq_length, input_dim, output_dim)
 
     logging.info('Training model')
-    DaRnnModel.train_rnn(model=net, verify=False,
-                         epochs=parameters['num_of_epochs'],
-                         learning_rate=parameters['learning_rate'],
-                         batch_size=parameters['batch_size'],
-                         X=X_train, Y=Y_train,
-                         X_test=X_test, Y_test=Y_test,
-                         show_attention=True)
+    net_utils.train_rnn(model=net, verify=False,
+                        epochs=parameters['num_of_epochs'],
+                        learning_rate=parameters['learning_rate'],
+                        batch_size=parameters['batch_size'],
+                        X=X_train, Y=Y_train,
+                        X_test=X_test, Y_test=Y_test,
+                        show_attention=True)
 
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
 
-    print("Experimental results with model DaRNN")
+    logging.info("Experimental results with attention models")
     train()
