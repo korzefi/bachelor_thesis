@@ -1,6 +1,7 @@
 from scripts.training import validation
 from scripts.utils import get_root_path
 from scripts.utils import get_time_string
+from scripts.preprocessing.config import CreatingDatasets
 
 import matplotlib.pyplot as plt
 import torch.nn
@@ -303,7 +304,7 @@ def train_rnn(model, verify, epochs, learning_rate, batch_size, X, Y, X_test, Y_
     plt.show()
 
 
-def reshape_to_linear(vecs_by_year, window_size=3):
+def reshape_to_linear(vecs_by_year, window_size=CreatingDatasets.WINDOW_SIZE):
     reshaped = [[]] * len(vecs_by_year[0])
 
     for year_vecs in vecs_by_year[-window_size:]:
