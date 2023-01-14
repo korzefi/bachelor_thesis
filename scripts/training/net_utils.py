@@ -142,7 +142,7 @@ def verify_model(model, X, Y, batch_size):
     print(' Backpropagated dependencies OK')
 
 
-def train_rnn(model, verify, epochs, learning_rate, batch_size, X, Y, X_test, Y_test, show_attention):
+def train_rnn(model, verify, X, Y, X_test, Y_test, show_attention):
     """
     Training loop for a model utilizing hidden states.
 
@@ -152,6 +152,12 @@ def train_rnn(model, verify, epochs, learning_rate, batch_size, X, Y, X_test, Y_
     batch_size - decides how many examples are in each mini batch.
     show_attention - decides if attention weights are plotted.
     """
+
+    # training hyperparams
+    epochs = model.num_of_epochs
+    learning_rate = model.learning_rate
+    batch_size = model.batch_size
+
     print_interval = 10
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -286,7 +292,7 @@ def train_rnn(model, verify, epochs, learning_rate, batch_size, X, Y, X_test, Y_
     plot_training_history(all_losses, all_val_losses, all_accs, all_val_accs, plot_batch_scores, Y_plot_batch)
 
     # roc curve
-    if epoch + 1 == 50:
+    if epoch + 1 == len(epochs):
         tpr_rnn, fpr_rnn, _ = roc_curve(Y_test, pred_prob)
         print(auc(fpr_rnn, tpr_rnn))
         plt.figure(1)

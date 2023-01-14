@@ -1,4 +1,3 @@
-from scripts.training.config import NetParameters
 from scripts.utils import get_root_path
 import torch.nn
 import torch.nn.functional as F
@@ -11,15 +10,25 @@ class RnnModel(torch.nn.Module):
     An RNN model using either LSTM
     """
 
+    HIDDEN_SIZE = 256
+    DROPOUT = 0.4
+    LEARNING_RATE = 0.001
+    BATCH_SIZE = 256
+    NUM_OF_EPOCHS = 160
+
     def __init__(self, seq_length, input_dim, output_dim):
         super(RnnModel, self).__init__()
 
-        self.seq_length = seq_length
-        self.hidden_size = NetParameters.hidden_size
+        self.T = seq_length
 
-        self.dropout = torch.nn.Dropout(NetParameters.dropout_p)
+        # hyperparams
+        self.m = RnnModel.HIDDEN_SIZE
+        self.dropout = torch.nn.Dropout(RnnModel.DROPOUT)
+        self.learning_rate = RnnModel.LEARNING_RATE
+        self.batch_size = RnnModel.BATCH_SIZE
+        self.num_of_epochs = RnnModel.NUM_OF_EPOCHS
 
-        self.encoder = torch.nn.LSTM(input_dim, self.hidden_size)
+        self.encoder = torch.nn.LSTM(input_dim, self.m)
 
         self.out = torch.nn.Linear(self.hidden_size, output_dim)
 
@@ -32,27 +41,38 @@ class RnnModel(torch.nn.Module):
         return score_seq, dummy_attn_weights  # No attention weights
 
     def init_hidden(self, batch_size):
-        h_init = torch.zeros(1, batch_size, self.hidden_size)
-        c_init = torch.zeros(1, batch_size, self.hidden_size)
+        h_init = torch.zeros(1, batch_size, self.m)
+        c_init = torch.zeros(1, batch_size, self.m)
         return (h_init, c_init)
 
-class AttentionRnnModel(torch.nn.Module):
+
+class AttnRnnModel(torch.nn.Module):
     """
     An RNN model with classic attention mechanism
     """
 
+    HIDDEN_SIZE = 128
+    DROPOUT = 0.2
+    LEARNING_RATE = 0.001
+    BATCH_SIZE = 256
+    NUM_OF_EPOCHS = 40
+
     def __init__(self, seq_length, input_dim, output_dim):
-        super(AttentionRnnModel, self).__init__()
+        super(AttnRnnModel, self).__init__()
 
-        self.m = NetParameters.hidden_size
         self.T = seq_length
-        self.output_dim = output_dim
 
-        self.dropout = torch.nn.Dropout(NetParameters.dropout_p)
+        # hyperparams
+        self.m = AttnRnnModel.HIDDEN_SIZE
+        self.dropout = torch.nn.Dropout(AttnRnnModel.DROPOUT)
+        self.learning_rate = AttnRnnModel.LEARNING_RATE
+        self.batch_size = AttnRnnModel.BATCH_SIZE
+        self.num_of_epochs = AttnRnnModel.NUM_OF_EPOCHS
+
 
         self.encoder = torch.nn.LSTM(input_dim, self.m)
 
-
+        # attn auxiliary NNs
         self.Uattn = torch.nn.Linear(self.m, self.m)
         self.vattn = torch.nn.Linear(self.m, seq_length)
 
@@ -88,23 +108,31 @@ class AttentionRnnModel(torch.nn.Module):
         return (h_init, c_init)
 
 
-class DualAttentionRnnModel(torch.nn.Module):
+class DualAttnRnnModel(torch.nn.Module):
     """
     A Dual-Attention RNN model, attending over both the input at each timestep
     and all hidden states of the encoder to make the final prediction.
     """
 
+    HIDDEN_SIZE = 256
+    DROPOUT = 0.2
+    LEARNING_RATE = 0.001
+    BATCH_SIZE = 256
+    NUM_OF_EPOCHS = 160
+
     def __init__(self, seq_length, input_dim, output_dim):
-        super(DualAttentionRnnModel, self).__init__()
+        super(DualAttnRnnModel, self).__init__()
 
-        self.n = input_dim
-        self.m = NetParameters.hidden_size
         self.T = seq_length
-        self.output_dim = output_dim
 
-        self.dropout = torch.nn.Dropout(NetParameters.dropout_p)
+        # hyperparams
+        self.m = DualAttnRnnModel.HIDDEN_SIZE
+        self.dropout = torch.nn.Dropout(DualAttnRnnModel.dropout_p)
+        self.learning_rate = DualAttnRnnModel.LEARNING_RATE
+        self.batch_size = DualAttnRnnModel.BATCH_SIZE
+        self.num_of_epochs = DualAttnRnnModel.NUM_OF_EPOCHS
 
-        self.encoder = torch.nn.LSTM(self.n, self.m)
+        self.encoder = torch.nn.LSTM(input_dim, self.m)
 
         # input attn auxiliary NNs
         self.We = torch.nn.Linear(2 * self.m, self.T)

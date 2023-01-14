@@ -1,4 +1,4 @@
-from scripts.training.config import LoadingDatasetsConfig, NetParameters
+from scripts.training.config import LoadingDatasetsConfig
 from scripts.utils import get_root_path
 from scripts.training.loading_datasets import load_dataset
 
@@ -15,17 +15,6 @@ sys.path.append(root_path)
 
 
 def train():
-    parameters = {
-        # Note, no learning rate decay implemented
-        'learning_rate': NetParameters.learning_rate,
-
-        # Size of mini batch
-        'batch_size': NetParameters.batch_size,
-
-        # Number of training iterations
-        'num_of_epochs': NetParameters.num_of_epochs
-    }
-
     torch.manual_seed(1)
     np.random.seed(1)
 
@@ -60,18 +49,32 @@ def train():
     # output dim is 2 because of 2 classes: 0 - dim[0] - non-mutated, dim[1] - mutated
     output_dim = 2
 
-    logging.info('Creating model')
-    net = models.DualAttentionRnnModel(seq_length, input_dim, output_dim)
-    # net = models.AttentionRnnModel(seq_length, input_dim, output_dim)
+    # logging.info('Creating RNN model')
+    # net = models.RnnModel(seq_length, input_dim, output_dim)
+    #
+    # logging.info('Training model')
+    # net_utils.train_rnn(model=net, verify=False,
+    #                     X=X_train, Y=Y_train,
+    #                     X_test=X_test, Y_test=Y_test,
+    #                     show_attention=False)
+
+    logging.info('Creating classic attention model')
+    net = models.AttnRnnModel(seq_length, input_dim, output_dim)
 
     logging.info('Training model')
     net_utils.train_rnn(model=net, verify=False,
-                        epochs=parameters['num_of_epochs'],
-                        learning_rate=parameters['learning_rate'],
-                        batch_size=parameters['batch_size'],
                         X=X_train, Y=Y_train,
                         X_test=X_test, Y_test=Y_test,
                         show_attention=True)
+
+    # logging.info('Creating dual-attention model')
+    # net = models.DualAttnRnnModel(seq_length, input_dim, output_dim)
+    #
+    # logging.info('Training model')
+    # net_utils.train_rnn(model=net, verify=False,
+    #                     X=X_train, Y=Y_train,
+    #                     X_test=X_test, Y_test=Y_test,
+    #                     show_attention=True)
 
 
 if __name__ == '__main__':

@@ -10,15 +10,6 @@ ROOT_PATH = get_root_path()
 #     batch_size = 256  # Size of mini batch
 #     num_of_epochs = 160  # Number of training iterations
 
-
-class NetParameters:
-    hidden_size = 256  # Number of hidden units in the encoder
-    dropout_p = 0.4  # Droprate (applied at input)
-    learning_rate = 0.001  # Note, no learning rate decay implemented
-    batch_size = 256  # Size of mini batch
-    num_of_epochs = 160  # Number of training iterations
-
-
 class LoadingDatasetsConfig:
     PROT_VEC_PATH = ROOT_PATH + '/data/covid-spike-GISAID/spikeprot0104.tar/spikeprot0104/protVec_100d_3grams.csv'
 
