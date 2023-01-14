@@ -34,6 +34,10 @@ def train():
     logging.info('Train dataset loaded')
     test_trigram_vecs, test_labels = load_dataset(LoadingDatasetsConfig.TEST_DATASET_PATH)
     logging.info('Test dataset loaded')
+
+    # logistic regression - optional
+    net_utils.logistic_regression(train_trigram_vecs, train_labels, test_trigram_vecs, test_labels)
+
     X_train = torch.tensor(train_trigram_vecs, dtype=torch.float32)
     Y_train = torch.tensor(train_labels, dtype=torch.int64)
     X_test = torch.tensor(test_trigram_vecs, dtype=torch.float32)
@@ -57,8 +61,8 @@ def train():
     output_dim = 2
 
     logging.info('Creating model')
-    # net = models.DualAttentionRnnModel(seq_length, input_dim, output_dim)
-    net = models.AttentionRnnModel(seq_length, input_dim, output_dim)
+    net = models.DualAttentionRnnModel(seq_length, input_dim, output_dim)
+    # net = models.AttentionRnnModel(seq_length, input_dim, output_dim)
 
     logging.info('Training model')
     net_utils.train_rnn(model=net, verify=False,
