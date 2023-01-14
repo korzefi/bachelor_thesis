@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import torch.nn
 import torch.nn.functional as F
 from sklearn.metrics import roc_curve, auc
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, matthews_corrcoef
 
 import time
 import math
@@ -299,3 +301,39 @@ def train_rnn(model, verify, epochs, learning_rate, batch_size, X, Y, X_test, Y_
             _, attn_weights = model(X_plot_batch, model.init_hidden(Y_plot_batch.shape[0]))
             plot_attention(attn_weights)
     plt.show()
+
+
+def reshape_to_linear(vecs_by_year, window_size=3):
+    reshaped = [[]] * len(vecs_by_year[0])
+
+    for year_vecs in vecs_by_year[-window_size:]:
+        for i, vec in enumerate(year_vecs):
+            reshaped[i] = reshaped[i] + vec.tolist()
+
+    return reshaped
+
+def logistic_regression(X_vecs, Y, X_vecs_test, Y_test):
+    X = reshape_to_linear(X_vecs)
+    X_test = reshape_to_linear(X_vecs_test)
+    clf = LogisticRegression(random_state=0).fit(X, Y)
+    train_acc = accuracy_score(Y, clf.predict(X))
+    train_pre = precision_score(Y, clf.predict(X))
+    train_rec = recall_score(Y, clf.predict(X))
+    train_fscore = f1_score(Y, clf.predict(X))
+    train_mcc = matthews_corrcoef(Y, clf.predict(X))
+
+    Y_pred = clf.predict(X_test)
+    precision, recall, fscore, mcc, val_acc = validation.evaluate(Y_test, Y_pred)
+    print('Logistic regression baseline:')
+    print('T_acc %.3f\tT_pre %.3f\tT_rec %.3f\tT_fscore %.3f\tT_mcc %.3f'
+          % (train_acc, train_pre, train_rec, train_fscore, train_mcc))
+    print('V_acc  %.3f\tV_pre %.3f\tV_rec %.3f\tV_fscore %.3f\tV_mcc %.3f'
+          % (val_acc, precision, recall, fscore, mcc))
+    # roc curve
+    y_pred_roc = clf.predict_proba(X_test)[:, 1]
+    fpr_rt_lr, tpr_rt_lr, _ = roc_curve(Y_test, y_pred_roc)
+    print(auc(fpr_rt_lr, tpr_rt_lr))
+    plt.figure(1)
+    plt.plot([0, 1], [0, 1], 'k--')
+    plt.plot(fpr_rt_lr, tpr_rt_lr, label='LR')
+    plt.legend(loc='best')
