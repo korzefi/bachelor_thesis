@@ -11,7 +11,7 @@ class RnnModel(torch.nn.Module):
     """
 
     HIDDEN_SIZE = 256
-    DROPOUT = 0.4
+    DROPOUT = 0.2
     LEARNING_RATE = 0.001
     BATCH_SIZE = 256
     NUM_OF_EPOCHS = 160
@@ -30,7 +30,7 @@ class RnnModel(torch.nn.Module):
 
         self.encoder = torch.nn.LSTM(input_dim, self.m)
 
-        self.out = torch.nn.Linear(self.hidden_size, output_dim)
+        self.out = torch.nn.Linear(self.m, output_dim)
 
     def forward(self, input_seq, hidden_state):
         input_seq = self.dropout(input_seq)
@@ -51,11 +51,11 @@ class AttnRnnModel(torch.nn.Module):
     An RNN model with classic attention mechanism
     """
 
-    HIDDEN_SIZE = 128
+    HIDDEN_SIZE = 512
     DROPOUT = 0.2
     LEARNING_RATE = 0.001
     BATCH_SIZE = 256
-    NUM_OF_EPOCHS = 40
+    NUM_OF_EPOCHS = 160
 
     def __init__(self, seq_length, input_dim, output_dim):
         super(AttnRnnModel, self).__init__()
@@ -118,7 +118,7 @@ class DualAttnRnnModel(torch.nn.Module):
     DROPOUT = 0.2
     LEARNING_RATE = 0.001
     BATCH_SIZE = 256
-    NUM_OF_EPOCHS = 160
+    NUM_OF_EPOCHS = 200
 
     def __init__(self, seq_length, input_dim, output_dim):
         super(DualAttnRnnModel, self).__init__()
@@ -127,7 +127,7 @@ class DualAttnRnnModel(torch.nn.Module):
 
         # hyperparams
         self.m = DualAttnRnnModel.HIDDEN_SIZE
-        self.dropout = torch.nn.Dropout(DualAttnRnnModel.dropout_p)
+        self.dropout = torch.nn.Dropout(DualAttnRnnModel.DROPOUT)
         self.learning_rate = DualAttnRnnModel.LEARNING_RATE
         self.batch_size = DualAttnRnnModel.BATCH_SIZE
         self.num_of_epochs = DualAttnRnnModel.NUM_OF_EPOCHS
@@ -177,6 +177,7 @@ class DualAttnRnnModel(torch.nn.Module):
         xt = x[:, :, t]
 
         x_tilde = alpha * xt
+        x_tilde = torch.unsqueeze(x_tilde, 0)
 
         return x_tilde, alpha
 

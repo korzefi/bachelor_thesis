@@ -58,23 +58,23 @@ def train():
     #                     X_test=X_test, Y_test=Y_test,
     #                     show_attention=False)
 
-    logging.info('Creating classic attention model')
-    net = models.AttnRnnModel(seq_length, input_dim, output_dim)
+    # logging.info('Creating classic attention model')
+    # net = models.AttnRnnModel(seq_length, input_dim, output_dim)
+    #
+    #
+    # net_utils.train_rnn(model=net, verify=False,
+    #                     X=X_train, Y=Y_train,
+    #                     X_test=X_test, Y_test=Y_test,
+    #                     show_attention=True)
+
+    logging.info('Creating dual-attention model')
+    net = models.DualAttnRnnModel(seq_length, input_dim, output_dim)
 
     logging.info('Training model')
     net_utils.train_rnn(model=net, verify=False,
                         X=X_train, Y=Y_train,
                         X_test=X_test, Y_test=Y_test,
                         show_attention=True)
-
-    # logging.info('Creating dual-attention model')
-    # net = models.DualAttnRnnModel(seq_length, input_dim, output_dim)
-    #
-    # logging.info('Training model')
-    # net_utils.train_rnn(model=net, verify=False,
-    #                     X=X_train, Y=Y_train,
-    #                     X_test=X_test, Y_test=Y_test,
-    #                     show_attention=True)
 
 
 if __name__ == '__main__':

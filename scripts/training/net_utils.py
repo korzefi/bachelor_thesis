@@ -292,15 +292,14 @@ def train_rnn(model, verify, X, Y, X_test, Y_test, show_attention):
     plot_training_history(all_losses, all_val_losses, all_accs, all_val_accs, plot_batch_scores, Y_plot_batch)
 
     # roc curve
-    if epoch + 1 == len(epochs):
-        tpr_rnn, fpr_rnn, _ = roc_curve(Y_test, pred_prob)
-        print(auc(fpr_rnn, tpr_rnn))
-        plt.figure(1)
-        # plt.xlim(0, 0.8)
-        plt.ylim(0.5, 1)
-        plt.plot([0, 1], [0, 1], 'k--')
-        plt.plot(fpr_rnn, tpr_rnn, label='attention')
-        plt.legend(loc='best')
+    tpr_rnn, fpr_rnn, _ = roc_curve(Y_test, pred_prob)
+    print(auc(fpr_rnn, tpr_rnn))
+    plt.figure(1)
+    # plt.xlim(0, 0.8)
+    plt.ylim(0.5, 1)
+    plt.plot([0, 1], [0, 1], 'k--')
+    plt.plot(fpr_rnn, tpr_rnn, label=model.__class__.__name__)
+    plt.legend(loc='best')
 
     if show_attention:
         with torch.no_grad():
