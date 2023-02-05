@@ -1,3 +1,9 @@
+# Filip Korzeniewski
+# Partially adapted from :
+# Yin R, Luusua E, Dabrowski J, Zhang Y, Kwoh CK.
+# Tempel: time-series mutation prediction of influenza A viruses via attention-based recurrent neural networks.
+# Bioinformatics. 2020 May 1;36(9):2697-2704. doi: 10.1093/bioinformatics/btaa050. PMID: 31999330.
+
 from scripts.training import validation
 from scripts.utils import get_root_path
 from scripts.utils import get_time_string

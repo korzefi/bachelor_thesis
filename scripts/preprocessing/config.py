@@ -1,3 +1,6 @@
+# author: Filip Korzeniewski
+
+
 from scripts.utils import get_root_path
 
 ROOT_PATH = get_root_path()
@@ -8,6 +11,7 @@ class GroupingRawData:
     DATA_RAW_FILE_NAME = 'spikeprot0104.fasta'
     SPLIT_FILES_DIR_NAME = 'split_data'
     FILES_NAME_CORE = 'spikeprot_batch_data'
+    # DIVISION might be: month, quarter, year
     DIVISION_TECHNIQUE = 'month'
     PERIOD_ROOT_DIR_NAME = 'periods'
     PERIOD_UNIQUE_DIR_NAME = 'unique'
@@ -27,22 +31,18 @@ class Clustering:
 class CreatingDatasets:
     """epitopes - list of positions: [(<beginning epitope position>, <end epitope position>)]
        dataset_size - number of rows in final dataset
-       # mutated_samples_ratio - dataset is being created as long as
-       #                         the mutated number of data rows in total number of rows is fulfilled
+       duplicated_data_ratio - dataset is being created as long as
+                               the mutated number of data rows in total number of rows is fulfilled
        window_size - number of consecutive clusters to be linked
        sample_num_per_pos - number of samples to be generated per epitope position
        epitopes_similarity_threshold - threshold over which sequences are replaced - check readme"""
     EPITOPES = [(194, 210), (291, 325), (307, 323), (371, 387), (410, 426), (525, 566), (530, 544), (722, 739),
                 (747, 763), (749, 771), (754, 770), (891, 906), (897, 913), (1101, 1115), (1129, 1145), (1213, 1229)]
-    # MUTATED_SAMPLES_RATIO = 0.2
     DUPLICATED_DATA_RATIO = 0.2
     WINDOW_SIZE = 10
     # 317 positions -> samples_num * 317 positions -> final number of rows
     DATASET_SIZE = 634000
     EPITOPES_SIMILARITY_THRESHOLD = 0.5
-    # TODO: later can be done, for now just randomly
-    # STRATEGY = 'single_epitope'
-    # ANALYZED_EPITOPE = 194
     DATASETS_MAIN_FILE_PATH = f'{GroupingRawData.DATA_PARENT_PATH}/datasets/period-{GroupingRawData.DIVISION_TECHNIQUE}.csv'
     DATASETS_DIR_PATH = f'{GroupingRawData.DATA_PARENT_PATH}/datasets'
 

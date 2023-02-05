@@ -1,3 +1,5 @@
+# author: Filip Korzeniewski
+
 from scripts.training.config import LoadingDatasetsConfig
 from scripts.utils import get_root_path
 from scripts.training.loading_datasets import load_dataset
@@ -49,14 +51,15 @@ def train():
     # output dim is 2 because of 2 classes: 0 - dim[0] - non-mutated, dim[1] - mutated
     output_dim = 2
 
-    # logging.info('Creating RNN model')
-    # net = models.RnnModel(seq_length, input_dim, output_dim)
-    #
-    # logging.info('Training model')
-    # net_utils.train_rnn(model=net, verify=False,
-    #                     X=X_train, Y=Y_train,
-    #                     X_test=X_test, Y_test=Y_test,
-    #                     show_attention=False)
+    logging.info('Creating RNN model')
+    net = models.RnnModel(seq_length, input_dim, output_dim)
+
+    logging.info('Training model')
+    net_utils.train_rnn(model=net, verify=False,
+                        X=X_train, Y=Y_train,
+                        X_test=X_test, Y_test=Y_test,
+                        show_attention=False)
+
 
     # logging.info('Creating classic attention model')
     # net = models.AttnRnnModel(seq_length, input_dim, output_dim)
@@ -67,14 +70,15 @@ def train():
     #                     X_test=X_test, Y_test=Y_test,
     #                     show_attention=True)
 
-    logging.info('Creating dual-attention model')
-    net = models.DualAttnRnnModel(seq_length, input_dim, output_dim)
 
-    logging.info('Training model')
-    net_utils.train_rnn(model=net, verify=False,
-                        X=X_train, Y=Y_train,
-                        X_test=X_test, Y_test=Y_test,
-                        show_attention=True)
+    # logging.info('Creating dual-attention model')
+    # net = models.DualAttnRnnModel(seq_length, input_dim, output_dim)
+    #
+    # logging.info('Training model')
+    # net_utils.train_rnn(model=net, verify=False,
+    #                     X=X_train, Y=Y_train,
+    #                     X_test=X_test, Y_test=Y_test,
+    #                     show_attention=True)
 
 
 if __name__ == '__main__':

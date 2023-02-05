@@ -1,3 +1,6 @@
+# author: Filip Korzeniewski
+
+
 import logging
 
 from scripts.clustering.config import MakingClusters

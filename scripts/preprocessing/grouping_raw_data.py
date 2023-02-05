@@ -1,3 +1,6 @@
+# author: Filip Korzeniewski
+
+
 import os
 import subprocess
 import shutil
@@ -360,12 +363,5 @@ def prepare_files():
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    # TODO: think about sequences that are not exactly 1273 long
-    #       think about clays of sequnces (where there is some info about the clay)
     prepare_files()
-    # periods_path = DirHandler.get_periods_dir()
-    # files_names = DirHandler.get_files_names(dir_path=f'{periods_path}/{cfg.PERIOD_UNIQUE_DIR_NAME}', extension='csv')
-    # files = list(map(lambda file_name: f'{periods_path}/{cfg.PERIOD_UNIQUE_DIR_NAME}/{file_name}', files_names))
-    # for file in files:
-    #     print(os.system(f'wc -l {file}.csv'))
     logging.info("Done")

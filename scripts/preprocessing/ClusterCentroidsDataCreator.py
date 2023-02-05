@@ -1,3 +1,6 @@
+# author: Filip Korzeniewski
+
+
 import pandas as pd
 import os
 

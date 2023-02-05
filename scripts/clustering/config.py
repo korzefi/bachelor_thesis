@@ -1,3 +1,6 @@
+# author: Filip Korzeniewski
+
+
 from scripts.utils import get_root_path
 
 ROOT_PATH = get_root_path()

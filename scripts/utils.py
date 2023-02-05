@@ -1,3 +1,6 @@
+# author: Filip Korzeniewski
+
+
 import os
 import logging
 

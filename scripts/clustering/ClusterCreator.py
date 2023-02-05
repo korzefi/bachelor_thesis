@@ -1,3 +1,6 @@
+# author: Filip Korzeniewski
+
+
 import logging
 
 import pandas as pd
