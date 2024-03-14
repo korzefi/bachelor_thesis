@@ -10,9 +10,9 @@ class MakingClusters:
     REDUCTION_METHOD = 'PCA'
     CLUSTER_METHOD = 'KMeans'
     PLOT_CLUSTERS_DIMS = 2
-    INIT_N_CLUSTERS = 10
+    INIT_N_CLUSTERS = 8
     END_N_CLUSTERS = 22
-    DATA_PARENT_PATH = ROOT_PATH + '/data/covid-spike-GISAID/spikeprot0104.tar/spikeprot0104'
+    DATA_PARENT_PATH = ROOT_PATH + '/data/spikeprot0308'
     EMBEDDED_DATA_PATH = f'{DATA_PARENT_PATH}/split_data/periods/unique/sequences_as_vectors'
     CLUSTER_PLOT_PATH = f'{DATA_PARENT_PATH}/clusters_plots/{REDUCTION_METHOD}'
 

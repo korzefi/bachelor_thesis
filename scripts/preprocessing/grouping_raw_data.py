@@ -26,7 +26,8 @@ class DirHandler:
         temporary_fasta_dir = DirHandler.get_temp_fasta_dir_path()
         temporary_csv_dir = DirHandler.get_temp_csv_dir_path()
         periods_dir = DirHandler.get_periods_dir()
-        dir_paths = [split_data_root_dir, temporary_fasta_dir, temporary_csv_dir, periods_dir]
+        # dir_paths = [split_data_root_dir, temporary_fasta_dir, temporary_csv_dir, periods_dir]
+        dir_paths = [temporary_fasta_dir, temporary_csv_dir]
         for path in dir_paths:
             DirHandler.create_dir(path)
 
@@ -82,17 +83,24 @@ class DirHandler:
 
 class BatchSplitter:
     lines_num_each_file = 100000
-    max_num_of_files = 20
-    start_line_idx = 13_000_001
+    max_num_of_files = 50
+    start_line_idx = 30_000_001
 
     @staticmethod
     def split_to_equal_files():
         logging.info("Splitting .fasta files")
+
         lines_num = int(BatchSplitter.__get_num_of_lines())
         max_num_iters = BatchSplitter.__get_iterations_num(lines_num)
         start_line_idx = BatchSplitter.start_line_idx
         left_lines = lines_num - (start_line_idx - 1)
-        end_line_idx = start_line_idx + min(BatchSplitter.lines_num_each_file, left_lines)
+
+        logging.info(f"Starting at {BatchSplitter.start_line_idx} line.")
+        num_lines_to_process = BatchSplitter.lines_num_each_file * BatchSplitter.max_num_of_files
+        finish_line = min(lines_num, BatchSplitter.start_line_idx + num_lines_to_process - 1)
+        logging.info(f"Finishing at {finish_line} index line.")
+
+        end_line_idx = start_line_idx + min(BatchSplitter.lines_num_each_file - 1, left_lines)
         filepath_with_name_core = DirHandler.get_temp_fasta_dir_path() + '/' + cfg.FILES_NAME_CORE
         raw_data_filepath = cfg.DATA_PARENT_PATH + '/' + cfg.DATA_RAW_FILE_NAME
 
@@ -105,7 +113,7 @@ class BatchSplitter:
             os.system(' '.join(copy_command))
             start_line_idx += BatchSplitter.lines_num_each_file
             left_lines = lines_num - (start_line_idx - 1)
-            end_line_idx = start_line_idx + min(BatchSplitter.lines_num_each_file, left_lines)
+            end_line_idx = start_line_idx + min(BatchSplitter.lines_num_each_file - 1, left_lines)
         logging.info(f'Finished at {end_line_idx} line')
 
     @staticmethod
@@ -362,6 +370,6 @@ def prepare_files():
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
+    utils.setup_logger()
     prepare_files()
     logging.info("Done")

@@ -3,6 +3,7 @@
 
 import os
 import logging
+from datetime import datetime
 
 
 def get_root_path():
@@ -16,6 +17,31 @@ def create_dir(path):
         os.makedirs(path)
     except FileExistsError:
         logging.warning(f'{path} already exists')
+
+
+def get_formatted_datetime():
+    current_datetime = datetime.now()
+    formatted_datetime = current_datetime.strftime("%d-%m-%Y_%H-%M")
+    return formatted_datetime
+
+
+def setup_logger(process_num=None, date=True, time=True):
+    datefmt = "%Y-%m-%d" if date else ""
+    timefmt = "%H:%M:%S" if time else ""
+    datetimefmt = ""
+    if date and time:
+        datetimefmt = f"{datefmt} {timefmt}"
+    else:
+        datetimefmt = f"{datefmt}{timefmt}"
+
+    if process_num is not None:
+        process_num = f"_{process_num + 1}"
+    else:
+        process_num = ""
+
+    logging.basicConfig(level=logging.INFO,
+                        format=f"%(levelname)s{process_num} %(asctime)s: %(message)s",
+                        datefmt=datetimefmt)
 
 
 def get_time_string(time):

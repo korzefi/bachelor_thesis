@@ -3,14 +3,15 @@
 
 import logging
 
+import scripts.utils as utils
 from scripts.clustering.config import MakingClusters
 from scripts.clustering.ClusterCreator import ClusterCreator, ClusterMethodFactory
 from scripts.clustering.visualization import ReductionMethodFactory, plot_clusters, plot_elbow_method
 
-FILENAME_TO_BE_PROCEED = '2021-12.csv'
+FILENAME_TO_BE_PROCEED = '2022-1.csv'
 USE_RANGE_CLUSTERS = False
 # this will be skipped if USE_RANGE_CLUSTERS is set, otherwise there will be only N_CLUSTERS version created
-N_CLUSTERS = 17
+N_CLUSTERS = 20
 SAVE_FIG = True
 
 
@@ -45,7 +46,7 @@ def visualize():
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
+    utils.setup_logger()
     logging.info(f'Clustering method: {MakingClusters.CLUSTER_METHOD}')
     logging.info(f'Reduction method: {MakingClusters.REDUCTION_METHOD}')
     visualize()

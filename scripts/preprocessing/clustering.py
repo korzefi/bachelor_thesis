@@ -1,8 +1,6 @@
 # author: Filip Korzeniewski
-
-
-import os
 import logging
+import os
 import multiprocessing
 
 import pandas as pd
@@ -19,7 +17,7 @@ class ProtVecTransformer:
     @staticmethod
     def transform_vector(file_num):
         if LOGGING_PROCESSES_ENABLED:
-            logging.basicConfig(level=logging.INFO)
+            utils.setup_logger()
         logging.info('Transforming sequences')
         files = ProtVecTransformer.__get_files_names()
         files = natsorted(files)
@@ -105,6 +103,7 @@ class VectorTransformer:
 
 
 def transform_vectors_multiprocess(first_file_num, last_file_num):
+    # TODO: should be rewritten using multithreading approach: get physical threads and use them in loop
     processes = []
     for i in range(first_file_num, last_file_num + 1):
         p = multiprocessing.Process(target=ProtVecTransformer.transform_vector, args=(i,))
@@ -120,10 +119,23 @@ def get_filepath_cluster_dict_for_centroids() -> {}:
     return {f'{Clustering.VECTOR_TEMP_DIR_PATH}/{file}': cluster for file, cluster in file_cluster_dict.items()}
 
 
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
+def create_final_data():
     filepath_clusters_data = get_filepath_cluster_dict_for_centroids()
     ClusterCentroidsDataCreator.create_centroids_data(filepath_cluster_dict=filepath_clusters_data, modify_file=True)
     ClusterLinker.link()
+    EpitopeDataCreator.create_final_data()
+
+
+def transform_to_vector():
+    file_num_2022_1 = 25
+    vec_transformer = ProtVecTransformer()
+    vec_transformer.transform_vector(file_num_2022_1)
+
+
+if __name__ == '__main__':
+    # logging.basicConfig(level=logging.INFO)
+    utils.setup_logger()
+    # create_final_data()
+    # transform_to_vector()
     EpitopeDataCreator.create_final_data()
 

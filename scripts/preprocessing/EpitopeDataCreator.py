@@ -11,6 +11,7 @@ import random
 
 from natsort import natsorted
 
+import scripts.utils as utils
 from scripts.preprocessing.config import CreatingDatasets, Clustering, GroupingRawData
 
 
@@ -232,14 +233,15 @@ class EpitopeDataCreator:
 
 
 class DatasetRefiller:
-    MAX_ITERS = 10
-    PROCESSES_NUM = 20
+    MAX_ITERS = 20
+    PROCESSES_NUM = 8
+    EXPECTED_DATASET_SIZE = 15000
 
     def __init__(self,
                  epitope_creator: EpitopeDataCreator,
-                 duplicated_data_ratio=CreatingDatasets.DUPLICATED_DATA_RATIO):
+                 mutated_data_ratio=CreatingDatasets.MUTATED_DATA_RATIO):
         self.__creator = epitope_creator
-        self.__duplicated_data_ratio = duplicated_data_ratio
+        self.__mutated_data_ratio = mutated_data_ratio
         self.duplicates_subset = [str(i) for i in range(CreatingDatasets.WINDOW_SIZE)]
 
     def create_dataset(self):
@@ -249,8 +251,9 @@ class DatasetRefiller:
         df.reset_index(drop=True, inplace=True)
         df.to_csv(filepath, index=False)
         logging.info(f'1 of {DatasetRefiller.MAX_ITERS} iteration complete')
-        for i in range(DatasetRefiller.MAX_ITERS - 1):
-            df.drop_duplicates(subset=self.duplicates_subset, inplace=True)
+        for i in range(1, DatasetRefiller.MAX_ITERS):
+            df = df.loc[df.astype(str).drop_duplicates(subset=self.duplicates_subset).index]
+            # df.drop_duplicates(subset=self.duplicates_subset, inplace=True)
             df.reset_index(drop=True, inplace=True)
             new_dataset_size = CreatingDatasets.DATASET_SIZE - len(df)
             self.__creator.set_dataset_size(new_dataset_size)
@@ -259,12 +262,13 @@ class DatasetRefiller:
             df.reset_index(drop=True, inplace=True)
             df.to_csv(filepath, index=False)
             total_dataset_size = CreatingDatasets.DATASET_SIZE
-            df_no_duplicates = df.drop_duplicates(subset=self.duplicates_subset, inplace=False)
-            actual_ratio = (len(df_no_duplicates) * 100) / total_dataset_size
-            logging.info(f'{i+2} iteration of {DatasetRefiller.MAX_ITERS} iteration complete')
-            logging.info(f'Duplicated ratio: {actual_ratio}')
-            if actual_ratio > self.__duplicated_data_ratio:
-                logging.info('Duplicated ratio achieved')
+            df_no_duplicates = df.loc[df.astype(str).drop_duplicates(subset=self.duplicates_subset).index]
+            # df_no_duplicates = df.drop_duplicates(subset=self.duplicates_subset, inplace=False)
+            actual_ratio = (len(df_no_duplicates[df_no_duplicates['y'] == 1])) / total_dataset_size
+            logging.info(f'{i+1} iteration of {DatasetRefiller.MAX_ITERS} iteration complete')
+            logging.info(f'Mutated ratio: {actual_ratio}')
+            if actual_ratio > self.__mutated_data_ratio:
+                logging.info('Mutated ratio achieved')
                 return
 
     def create_datasets_multiprocess(self):
@@ -283,7 +287,7 @@ class DatasetRefiller:
         self.__merge_dataset_files()
 
     def _create_dataset_file(self, process_num):
-        logging.basicConfig(level=logging.INFO)
+        utils.setup_logger(process_num=process_num)
 
         filepath = CreatingDatasets.DATASETS_MAIN_FILE_PATH
         filepath = filepath[:-4] + f'-{process_num}.csv'
@@ -296,21 +300,31 @@ class DatasetRefiller:
         periods = os.listdir(filepath)
         periods = list(map(lambda x: f'{CreatingDatasets.DATASETS_DIR_PATH}/{x}', periods))
         df = pd.read_csv(periods[0])
-        df.drop_duplicates(subset=self.duplicates_subset, inplace=True)
+        df = df.loc[df.astype(str).drop_duplicates(subset=self.duplicates_subset).index]
+        # df.drop_duplicates(subset=self.duplicates_subset, inplace=True)
         df.reset_index(drop=True, inplace=True)
         periods = periods[1:]
         for filename in periods:
             current_df = pd.read_csv(filename)
             df = pd.concat([df, current_df], ignore_index=True)
-            df.drop_duplicates(subset=self.duplicates_subset, inplace=True)
+            df = df.loc[df.astype(str).drop_duplicates(subset=self.duplicates_subset).index]
+            # df.drop_duplicates(subset=self.duplicates_subset, inplace=True)
             df.reset_index(drop=True, inplace=True)
-        output_filepath = f'{CreatingDatasets.DATASETS_DIR_PATH}/period-month-concat.csv'
+        curr_dataset_size = len(df)
+        logging.info(f"Current size of dataset: {curr_dataset_size}")
+        mutated_samples_num = len(df[df['y'] == 1])
+        current_ratio = (mutated_samples_num / curr_dataset_size) * 100
+        logging.info(f'Current mutated ratio: {current_ratio}%')
+        expected_dataset_size = DatasetRefiller.EXPECTED_DATASET_SIZE
+        logging.info(f'Expected dataset size: {expected_dataset_size}')
+        expected_ratio = (mutated_samples_num / expected_dataset_size) * 100
+        logging.info(f'Expected mutated ratio: {expected_ratio}%')
+        output_filepath = f'{CreatingDatasets.DATASETS_DIR_PATH}/{utils.get_formatted_datetime()}-period-month-concat.csv'
         df.to_csv(output_filepath, index=False)
-
 
 def create_final_data():
     epitope_creator = EpitopeDataCreator()
     dataset_creator = DatasetRefiller(epitope_creator=epitope_creator)
-    # dataset_creator.create_dataset()
+    # # dataset_creator.create_dataset()
     # dataset_creator.create_datasets_multiprocess()
     dataset_creator.merge_files()
