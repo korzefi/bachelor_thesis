@@ -148,7 +148,7 @@ def verify_model(model, X, Y, batch_size):
     print(' Backpropagated dependencies OK')
 
 
-def train_rnn(model, verify, X, Y, X_test, Y_test, show_attention):
+def train_rnn(model, verify, X, Y, X_valid, Y_valid, show_attention):
     """
     Training loop for a model utilizing hidden states.
 
@@ -186,11 +186,11 @@ def train_rnn(model, verify, X, Y, X_test, Y_test, show_attention):
     plot_batch_size = 10
     i = 0
     for j in range(10):
-        while Y_test[i] == 0:
+        while Y_valid[i] == 0:
             i += 1
 
-    X_plot_batch = X_test[:, i:i + plot_batch_size, :]
-    Y_plot_batch = Y_test[i:i + plot_batch_size]
+    X_plot_batch = X_valid[:, i:i + plot_batch_size, :]
+    Y_plot_batch = Y_valid[i:i + plot_batch_size]
     plot_batch_scores = []
 
     start_time = time.time()
@@ -276,13 +276,13 @@ def train_rnn(model, verify, X, Y, X_test, Y_test, show_attention):
 
         with torch.no_grad():
             model.eval()
-            test_scores, _ = model(X_test, model.init_hidden(Y_test.shape[0]))
+            test_scores, _ = model(X_valid, model.init_hidden(Y_valid.shape[0]))
             predictions = predictions_from_output(test_scores)
-            predictions = predictions.view_as(Y_test)
+            predictions = predictions.view_as(Y_valid)
             pred_prob = calculate_prob(test_scores)
             precision, recall, fscore, mcc, val_acc = validation.evaluate(Y_test, predictions)
 
-            val_loss = criterion(test_scores, Y_test).item()
+            val_loss = criterion(test_scores, Y_valid).item()
             all_val_losses.append(val_loss)
             all_val_accs.append(val_acc)
 
@@ -298,7 +298,7 @@ def train_rnn(model, verify, X, Y, X_test, Y_test, show_attention):
     plot_training_history(all_losses, all_val_losses, all_accs, all_val_accs, plot_batch_scores, Y_plot_batch)
 
     # roc curve
-    tpr_rnn, fpr_rnn, _ = roc_curve(Y_test, pred_prob)
+    tpr_rnn, fpr_rnn, _ = roc_curve(Y_valid, pred_prob)
     print(auc(fpr_rnn, tpr_rnn))
     plt.figure(1)
     # plt.xlim(0, 0.8)
@@ -327,7 +327,7 @@ def reshape_to_linear(vecs_by_year, window_size=CreatingDatasets.WINDOW_SIZE):
 def logistic_regression(X_vecs, Y, X_vecs_valid, Y_valid):
     X = reshape_to_linear(X_vecs)
     X_valid = reshape_to_linear(X_vecs_valid)
-    clf = LogisticRegression(random_state=0).fit(X, Y)
+    clf = LogisticRegression(random_state=0, max_iter=1000).fit(X, Y)
     train_acc = accuracy_score(Y, clf.predict(X))
     train_pre = precision_score(Y, clf.predict(X))
     train_rec = recall_score(Y, clf.predict(X))

@@ -7,7 +7,7 @@ ROOT_PATH = get_root_path()
 
 
 class LoadingDatasetsConfig:
-    PROT_VEC_PATH = ROOT_PATH + '/data/spikeprot0308/protVec_100d_3grams.csv'
+    PROT_VEC_PATH = ROOT_PATH + '/data/spikeprot0308/protVec_100d_3grams2.csv'
 
     DATASETS_DIRPATH = ROOT_PATH + "/data/spikeprot0308/datasets"
     TRAIN_DATASET_PATH = f'{DATASETS_DIRPATH}/train-16-03-2024_12-11.csv'
@@ -15,4 +15,5 @@ class LoadingDatasetsConfig:
 
 
 class ResultsConfig:
-    RESULTS_DIRPATH = '/Users/filip/Desktop/praca-inz-eiti/covid-rnn/data/covid-spike-GISAID/spikeprot0104.tar/spikeprot0104/results'
+    # RESULTS_DIRPATH = '/Users/filip/Desktop/praca-inz-eiti/covid-rnn/data/covid-spike-GISAID/spikeprot0104.tar/spikeprot0104/results'
+    RESULTS_DIRPATH = ROOT_PATH + '/data/spikeprot0308/train_results'
