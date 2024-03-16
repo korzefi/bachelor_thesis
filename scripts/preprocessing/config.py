@@ -42,7 +42,7 @@ class CreatingDatasets:
     WINDOW_SIZE = 10
     # 317 positions -> samples_num * 317 positions -> final number of rows
     # DATASET_SIZE = 634000
-    DATASET_SIZE = 317 * 160
+    DATASET_SIZE = 317 * 40
     EPITOPES_SIMILARITY_THRESHOLD = 0.5
     DATASETS_MAIN_FILE_PATH = f'{GroupingRawData.DATA_PARENT_PATH}/datasets/period-{GroupingRawData.DIVISION_TECHNIQUE}.csv'
     DATASETS_DIR_PATH = f'{GroupingRawData.DATA_PARENT_PATH}/datasets'

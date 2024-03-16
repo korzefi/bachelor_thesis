@@ -25,7 +25,7 @@ def get_formatted_datetime():
     return formatted_datetime
 
 
-def setup_logger(process_num=None, date=True, time=True):
+def setup_logger(process_id=None, date=True, time=True):
     datefmt = "%Y-%m-%d" if date else ""
     timefmt = "%H:%M:%S" if time else ""
     datetimefmt = ""
@@ -34,13 +34,13 @@ def setup_logger(process_num=None, date=True, time=True):
     else:
         datetimefmt = f"{datefmt}{timefmt}"
 
-    if process_num is not None:
-        process_num = f"_{process_num + 1}"
+    if process_id is not None:
+        process_id = f"_{process_id + 1}"
     else:
-        process_num = ""
+        process_id = ""
 
     logging.basicConfig(level=logging.INFO,
-                        format=f"%(levelname)s{process_num} %(asctime)s: %(message)s",
+                        format=f"%(levelname)s{process_id} %(asctime)s: %(message)s",
                         datefmt=datetimefmt)
 
 

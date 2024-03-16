@@ -286,14 +286,14 @@ class DatasetRefiller:
     def merge_files(self):
         self.__merge_dataset_files()
 
-    def _create_dataset_file(self, process_num):
-        utils.setup_logger(process_num=process_num)
+    def _create_dataset_file(self, process_id):
+        utils.setup_logger(process_id=process_id)
 
         filepath = CreatingDatasets.DATASETS_MAIN_FILE_PATH
-        filepath = filepath[:-4] + f'-{process_num}.csv'
+        filepath = filepath[:-4] + f'-{process_id}.csv'
         df = self.__creator.create_data()
         df.to_csv(filepath, index=False)
-        logging.info(f'Creating file for {process_num} process finished')
+        logging.info(f'Creating file for {process_id} process finished')
 
     def __merge_dataset_files(self):
         filepath = CreatingDatasets.DATASETS_DIR_PATH
@@ -325,6 +325,8 @@ class DatasetRefiller:
 def create_final_data():
     epitope_creator = EpitopeDataCreator()
     dataset_creator = DatasetRefiller(epitope_creator=epitope_creator)
-    # # dataset_creator.create_dataset()
+    # dataset_creator.create_dataset()
+    for i in range(20):
+        dataset_creator.create_datasets_multiprocess()
     # dataset_creator.create_datasets_multiprocess()
-    dataset_creator.merge_files()
+    # dataset_creator.merge_files()
