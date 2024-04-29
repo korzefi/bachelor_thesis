@@ -2,7 +2,7 @@
 
 import scripts.utils as utils
 
-from scripts.training.config import LoadingDatasetsConfig
+from scripts.training.config import LoadingDatasetsConfig, ResultsConfig
 from scripts.utils import get_root_path
 from scripts.training.loading_datasets import load_dataset
 
@@ -29,7 +29,7 @@ def train():
     logging.info('Test dataset loaded')
 
     # logistic regression - optional
-    net_utils.logistic_regression(train_trigram_vecs, train_labels, valid_trigram_vecs, valid_labels)
+    # net_utils.logistic_regression(train_trigram_vecs, train_labels, valid_trigram_vecs, valid_labels)
 
     X_train = torch.tensor(train_trigram_vecs, dtype=torch.float32)
     Y_train = torch.tensor(train_labels, dtype=torch.int64)
@@ -46,45 +46,58 @@ def train():
 
     logging.info('Class imbalances:')
     logging.info(' Training %.3f' % train_imbalance)
+    logging.info(' Training counts %.3f' % train_counts)
     logging.info(' Validating  %.3f' % valid_imbalance)
+    logging.info(' Validating counts  %.3f' % valid_counts)
 
     input_dim = X_train.shape[2]
     seq_length = X_train.shape[0]
     # output dim is 2 because of 2 classes: 0 - dim[0] - non-mutated, dim[1] - mutated
     output_dim = 2
 
-    logging.info('Creating RNN model')
-    net = models.RnnModel(seq_length, input_dim, output_dim)
+    # logging.info('Creating RNN model')
+    # net = models.RnnModel(seq_length, input_dim, output_dim)
+    #
+    # logging.info('Training model')
+    # net_utils.train_rnn(model=net, verify=False,
+    #                     X=X_train, Y=Y_train,
+    #                     X_valid=X_valid, Y_valid=Y_valid,
+    #                     show_attention=False)
+
+    # logging.info('Creating classic attention model')
+    # net = models.AttnRnnModel(seq_length, input_dim, output_dim)
+    #
+    # net_utils.train_rnn(model=net, verify=False,
+    #                     X=X_train, Y=Y_train,
+    #                     X_valid=X_valid, Y_valid=Y_valid,
+    #                     show_attention=True)
+
+    logging.info('Creating dual-attention model')
+    net = models.DualAttnRnnModel(seq_length, input_dim, output_dim)
 
     logging.info('Training model')
     net_utils.train_rnn(model=net, verify=False,
                         X=X_train, Y=Y_train,
                         X_valid=X_valid, Y_valid=Y_valid,
-                        show_attention=False)
+                        show_attention=True)
 
 
-    # logging.info('Creating classic attention model')
-    # net = models.AttnRnnModel(seq_length, input_dim, output_dim)
-    #
-    #
-    # net_utils.train_rnn(model=net, verify=False,
-    #                     X=X_train, Y=Y_train,
-    #                     X_test=X_test, Y_test=Y_test,
-    #                     show_attention=True)
+def test():
+    logging.info('Loading test dataset')
+    test_trigram_vecs, test_labels = load_dataset(LoadingDatasetsConfig.TEST_DATASET_PATH)
+    logging.info('Test dataset loaded')
 
+    X_test = torch.tensor(test_trigram_vecs, dtype=torch.float32)
+    Y_test = torch.tensor(test_labels, dtype=torch.int64)
 
-    # logging.info('Creating dual-attention model')
-    # net = models.DualAttnRnnModel(seq_length, input_dim, output_dim)
-    #
-    # logging.info('Training model')
-    # net_utils.train_rnn(model=net, verify=False,
-    #                     X=X_train, Y=Y_train,
-    #                     X_test=X_test, Y_test=Y_test,
-    #                     show_attention=True)
+    logging.info('Testing model')
+    model = torch.load(ResultsConfig.MODEL_PATH)
+    net_utils.test_model(model=model, X_test=X_test, Y_test=Y_test)
 
 
 if __name__ == '__main__':
     utils.setup_logger()
     # logging.info("Experimental results with attention models")
-    logging.info("Logistic regression")
+    # logging.info("Logistic regression")
     train()
+    # test()

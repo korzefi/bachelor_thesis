@@ -8,6 +8,7 @@ from scripts.training import validation
 from scripts.utils import get_root_path
 from scripts.utils import get_time_string
 from scripts.preprocessing.config import CreatingDatasets
+from scripts.training.config import ResultsConfig
 
 import matplotlib.pyplot as plt
 import torch.nn
@@ -181,6 +182,7 @@ def train_rnn(model, verify, X, Y, X_valid, Y_valid, show_attention):
     all_fscores = []
     all_mccs = []
     all_val_accs = []
+    best_mcc = 0.0
 
     # Find mini batch that contains at least one mutation to plot
     plot_batch_size = 10
@@ -218,7 +220,8 @@ def train_rnn(model, verify, X, Y, X_valid, Y_valid, show_attention):
             # training step
             # forward() is called here
             scores, _ = model(X_batch, hidden)
-            # logits passed directly, cross-entr func does the same itself what is later done in predictions_from_output func
+            # logits passed directly,
+            # cross-entr func does the same itself what is later done in predictions_from_output func
             loss = criterion(scores, Y_batch)
             # set gradients to 0
             optimizer.zero_grad()
@@ -280,11 +283,18 @@ def train_rnn(model, verify, X, Y, X_valid, Y_valid, show_attention):
             predictions = predictions_from_output(test_scores)
             predictions = predictions.view_as(Y_valid)
             pred_prob = calculate_prob(test_scores)
-            precision, recall, fscore, mcc, val_acc = validation.evaluate(Y_test, predictions)
+            precision, recall, fscore, mcc, val_acc = validation.evaluate(Y_valid, predictions)
 
             val_loss = criterion(test_scores, Y_valid).item()
             all_val_losses.append(val_loss)
             all_val_accs.append(val_acc)
+
+            if mcc > best_mcc:
+                best_mcc = mcc
+                print('Epoch %d Time %s' % (epoch, get_time_string(elapsed_time)))
+                print(f'Best mcc updated: V_loss %.3f\tV_acc %.3f\tV_pre %.3f\tV_rec %.3f\tV_fscore %.3f\tV_mcc %.3f' % (
+                    val_loss, val_acc, precision, recall, fscore, mcc))
+                torch.save(model, ResultsConfig.MODEL_PATH)
 
             plot_scores, _ = model(X_plot_batch, model.init_hidden(Y_plot_batch.shape[0]))
             plot_batch_scores.append(plot_scores)
@@ -323,6 +333,19 @@ def reshape_to_linear(vecs_by_year, window_size=CreatingDatasets.WINDOW_SIZE):
             reshaped[i] = reshaped[i] + vec.tolist()
 
     return reshaped
+
+
+def test_model(model, X_test, Y_test):
+    model.eval()
+    test_scores, _ = model(X_test, model.init_hidden(Y_test.shape[0]))
+    predictions = predictions_from_output(test_scores)
+    predictions = predictions.view_as(Y_test)
+    pred_prob = calculate_prob(test_scores)
+    precision, recall, fscore, mcc, val_acc = validation.evaluate(Y_test, predictions)
+
+    print('Test_acc %.3f\tTest_pre %.3f\tTest_rec %.3f\tTest_fscore %.3f\tTest_mcc %.3f' % (
+        val_acc, precision, recall, fscore, mcc))
+
 
 def logistic_regression(X_vecs, Y, X_vecs_valid, Y_valid):
     X = reshape_to_linear(X_vecs)

@@ -12,8 +12,11 @@ class LoadingDatasetsConfig:
     DATASETS_DIRPATH = ROOT_PATH + "/data/spikeprot0308/datasets"
     TRAIN_DATASET_PATH = f'{DATASETS_DIRPATH}/train-16-03-2024_12-11.csv'
     VALID_DATASET_PATH = f'{DATASETS_DIRPATH}/valid-16-03-2024_12-11.csv'
+    TEST_DATASET_PATH = f'{DATASETS_DIRPATH}/test-16-03-2024_12-11.csv'
 
 
 class ResultsConfig:
     # RESULTS_DIRPATH = '/Users/filip/Desktop/praca-inz-eiti/covid-rnn/data/covid-spike-GISAID/spikeprot0104.tar/spikeprot0104/results'
     RESULTS_DIRPATH = ROOT_PATH + '/data/spikeprot0308/train_results'
+    # MODEL_PATH = RESULTS_DIRPATH + '/rnn_model_mcc823.pth'
+    MODEL_PATH = RESULTS_DIRPATH + '/debug.pth'

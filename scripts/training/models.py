@@ -21,7 +21,7 @@ class RnnModel(torch.nn.Module):
     DROPOUT = 0.2
     LEARNING_RATE = 0.001
     BATCH_SIZE = 256
-    NUM_OF_EPOCHS = 80
+    NUM_OF_EPOCHS = 100
 
     def __init__(self, seq_length, input_dim, output_dim):
         super(RnnModel, self).__init__()
@@ -62,7 +62,7 @@ class AttnRnnModel(torch.nn.Module):
     DROPOUT = 0.2
     LEARNING_RATE = 0.0005
     BATCH_SIZE = 256
-    NUM_OF_EPOCHS = 120
+    NUM_OF_EPOCHS = 200
 
     def __init__(self, seq_length, input_dim, output_dim):
         super(AttnRnnModel, self).__init__()
@@ -125,7 +125,7 @@ class DualAttnRnnModel(torch.nn.Module):
     DROPOUT = 0.2
     LEARNING_RATE = 0.01
     BATCH_SIZE = 256
-    NUM_OF_EPOCHS = 300
+    NUM_OF_EPOCHS = 400
 
     def __init__(self, seq_length, input_dim, output_dim):
         super(DualAttnRnnModel, self).__init__()
