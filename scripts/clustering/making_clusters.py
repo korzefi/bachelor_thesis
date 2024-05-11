@@ -45,6 +45,10 @@ def visualize():
         # plot_clusters(clusters, reduction_method2, filename, save_fig=SAVE_FIG)
 
 
+def making_cluster():
+    pass
+
+
 if __name__ == '__main__':
     utils.setup_logger()
     logging.info(f'Clustering method: {MakingClusters.CLUSTER_METHOD}')

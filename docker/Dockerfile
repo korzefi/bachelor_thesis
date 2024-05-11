@@ -14,4 +14,3 @@ RUN pip install -r requirements.txt
 
 # TODO: Maybe just add some copy command to script to copy files when docker process is finished?
 CMD ["python3", "scripts/preprocessing/grouping_raw_data.py"]
-#CMD ["python3", "scripts/preprocessing/clustering.py"]
