@@ -357,6 +357,7 @@ class PeriodSorter:
 
 
 def prepare_files():
+    logging.info("Preparing files started")
     DirHandler.create_dirs()
     BatchSplitter.split_to_equal_files()
     CsvTransformer.transform_files()
@@ -367,6 +368,7 @@ def prepare_files():
     BatchCleaner.remove_duplicates_periods()
     BatchCleaner.remove_empty_periods_dir()
     BatchCleaner.create_files_with_no_duplicate_sequences()
+    logging.info("Preparing files finished")
 
 
 if __name__ == '__main__':

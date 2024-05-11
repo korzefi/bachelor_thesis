@@ -132,8 +132,12 @@ def transform_to_vector():
     vec_transformer.transform_vector(file_num_2022_1)
 
 
+def create_cluster_data():
+    logging.info("Creating cluster data started")
+    logging.info("Creating cluster data finished")
+
+
 if __name__ == '__main__':
-    # logging.basicConfig(level=logging.INFO)
     utils.setup_logger()
     # create_final_data()
     # transform_to_vector()

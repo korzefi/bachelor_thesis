@@ -1,7 +1,12 @@
-from scripts.preprocessing import grouping_raw_data
-from scripts.clustering import making_clusters
+import scripts.utils as utils
+
+from scripts.preprocessing.grouping_raw_data import prepare_files
+from scripts.preprocessing.clustering import create_cluster_data
+from scripts.training.training import train
 
 if __name__ == '__main__':
-    grouping_raw_data
-    making_clusters
+    utils.setup_logger()
+    prepare_files()
+    create_cluster_data()
+    train()
 
