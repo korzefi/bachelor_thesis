@@ -74,8 +74,3 @@ def load_dataset(filepath):
     trigram_vecs = np.moveaxis(trigram_vecs, 1, 0)
 
     return trigram_vecs, labels
-
-
-if __name__ == '__main__':
-    trigram_vecs, labels = load_dataset(f'{LoadingDatasetsConfig.DATASETS_DIRPATH}/train-15-09-22.csv')
-    pass
