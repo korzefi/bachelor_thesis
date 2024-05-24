@@ -46,6 +46,11 @@ run_app_container() {
    -d --network host \
    --name "$CONTAINER_NAME" \
    "$APP_IMAGE_NAME"
+   docker logs --follow
+}
+
+copy_result_model() {
+  docker cp "$CONTAINER_NAME":data/model ./data/model
 }
 
 check_if_project_root_directory
@@ -53,3 +58,6 @@ echo "Building images"
 build_images
 echo "Beginning proccess..."
 run_app_container
+echo "Process finished."
+copy_result_model
+echo "Model copied to 'data/model/covid-model.pth'"
