@@ -15,7 +15,7 @@ import torch.nn
 import torch.nn.functional as F
 from sklearn.metrics import roc_curve, auc
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, matthews_corrcoef
+from sklearn.metrics import confusion_matrix
 
 import time
 import math
@@ -116,7 +116,7 @@ def calculate_prob(scores):
     return pred_probe
 
 
-def train_rnn(model, verify, X, Y, X_valid, Y_valid, show_attention):
+def train_rnn(model, X, Y, X_valid, Y_valid, show_attention):
     """
     Training loop for a model utilizing hidden states.
 
@@ -149,7 +149,7 @@ def train_rnn(model, verify, X, Y, X_valid, Y_valid, show_attention):
     all_val_accs = []
     best_mcc = 0.0
 
-    # Find mini batch that contains at least one mutation to plot
+    # Find mini batch that contains at least one mutation to plot attention
     plot_batch_size = 10
     i = 0
     for j in range(10):
@@ -164,16 +164,8 @@ def train_rnn(model, verify, X, Y, X_valid, Y_valid, show_attention):
     for epoch in range(epochs):
         model.train()
         running_loss = 0
-        # running_acc = 0
-        # running_pre = 0
-        # running_pre_total = 0
-        # running_rec = 0
-        # running_mcc_numerator = 0
-        # running_mcc_denominator = 0
-        # running_rec_total = 0
-
-        running_Ytrue = torch.tensor
-        running_Ypred = torch.tensor
+        running_Ytrue = None
+        running_Ypred = None
 
         hidden = model.init_hidden(batch_size)
 
@@ -198,22 +190,8 @@ def train_rnn(model, verify, X, Y, X_valid, Y_valid, show_attention):
 
             predictions = predictions_from_output(scores)
 
-            # conf_matrix = evaluation.get_confusion_matrix(Y_batch, predictions)
-            # TP, FP, FN, TN = conf_matrix[0][0], conf_matrix[0][1], conf_matrix[1][0], conf_matrix[1][1]
-            # running_acc += TP + TN
-            # running_pre += TP
-            # running_pre_total += TP + FP
-            # running_rec += TP
-            # running_rec_total += TP + FN
-            # running_mcc_numerator += (TP * TN - FP * FN)
-            # if ((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN)) == 0:
-            #     running_mcc_denominator += 0
-            # else:
-            #     running_mcc_denominator += math.sqrt((TP + FP) * (TP + FN) * (TN + FP) * (TN + FN))
-
-            running_Ytrue += Y_batch
-            running_Ypred += predictions
-
+            running_Ytrue = Y_batch if running_Ytrue is None else torch.cat((running_Ytrue, Y_batch), 0)
+            running_Ypred = predictions if running_Ypred is None else torch.cat((running_Ypred, predictions), 0)
             running_loss += loss.item()
 
         elapsed_time = time.time() - start_time
@@ -226,32 +204,6 @@ def train_rnn(model, verify, X, Y, X_valid, Y_valid, show_attention):
         all_mccs.append(epoch_mcc)
         epoch_loss = running_loss / num_of_batches
         all_losses.append(epoch_loss)
-
-        # epoch_acc = running_acc / Y.shape[0]
-        #
-        # if running_pre_total == 0:
-        #     epoch_pre = 0
-        # else:
-        #     epoch_pre = running_pre / running_pre_total
-        # all_pres.append(epoch_pre)
-        #
-        # if running_rec_total == 0:
-        #     epoch_rec = 0
-        # else:
-        #     epoch_rec = running_rec / running_rec_total
-        # all_recs.append(epoch_rec)
-        #
-        # if (epoch_pre + epoch_rec) == 0:
-        #     epoch_fscore = 0
-        # else:
-        #     epoch_fscore = 2 * epoch_pre * epoch_rec / (epoch_pre + epoch_rec)
-        # all_fscores.append(epoch_fscore)
-        #
-        # if running_mcc_denominator == 0:
-        #     epoch_mcc = 0
-        # else:
-        #     epoch_mcc = running_mcc_numerator / running_mcc_denominator
-        # all_mccs.append(epoch_mcc)
 
         with torch.no_grad():
             model.eval()
