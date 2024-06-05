@@ -18,6 +18,7 @@ class DirHandler:
     temporary_csv_dir_name = 'temp_csv'
     period_root_dir_name = 'periods'
     files_name_core = 'spikeprot_batch_data'
+    split_files_dir_name = 'split_data'
 
     @staticmethod
     def create_dirs():
@@ -26,14 +27,14 @@ class DirHandler:
         temporary_fasta_dir = DirHandler.get_temp_fasta_dir_path()
         temporary_csv_dir = DirHandler.get_temp_csv_dir_path()
         periods_dir = DirHandler.get_periods_dir()
-        # dir_paths = [split_data_root_dir, temporary_fasta_dir, temporary_csv_dir, periods_dir]
-        dir_paths = [temporary_fasta_dir, temporary_csv_dir]
+        dir_paths = [split_data_root_dir, temporary_fasta_dir, temporary_csv_dir, periods_dir]
+        # dir_paths = [temporary_fasta_dir, temporary_csv_dir]
         for path in dir_paths:
             DirHandler.create_dir(path)
 
     @staticmethod
     def __get_split_data_root_path():
-        return f'{cfg.DATA_PARENT_PATH}/{cfg.SPLIT_FILES_DIR_NAME}'
+        return f'{cfg.DATA_PARENT_PATH}/{DirHandler.split_files_dir_name}'
 
     @staticmethod
     def get_temp_fasta_dir_path():
@@ -71,7 +72,7 @@ class DirHandler:
 
     @staticmethod
     def get_periods_dir():
-        return f'{DirHandler.__get_split_data_root_path()}/{cfg.PERIOD_ROOT_DIR_NAME}'
+        return f'{DirHandler.__get_split_data_root_path()}/{DirHandler.period_root_dir_name}'
 
     @staticmethod
     def get_periods_file_names():
@@ -85,6 +86,7 @@ class BatchSplitter:
     lines_num_each_file = 100000
     max_num_of_files = 50
     start_line_idx = 30_000_001
+    files_name_core = 'spikeprot_batch_data'
 
     @staticmethod
     def split_to_equal_files():
@@ -101,7 +103,7 @@ class BatchSplitter:
         logging.info(f"Finishing at {finish_line} index line.")
 
         end_line_idx = start_line_idx + min(BatchSplitter.lines_num_each_file - 1, left_lines)
-        filepath_with_name_core = DirHandler.get_temp_fasta_dir_path() + '/' + cfg.FILES_NAME_CORE
+        filepath_with_name_core = DirHandler.get_temp_fasta_dir_path() + '/' + BatchSplitter.files_name_core
         raw_data_filepath = cfg.DATA_PARENT_PATH + '/' + cfg.DATA_RAW_FILE_NAME
 
         for i in range(max_num_iters):

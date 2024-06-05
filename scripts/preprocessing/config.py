@@ -6,26 +6,19 @@ from scripts.utils import get_root_path
 ROOT_PATH = get_root_path()
 
 
+DATA_PARENT_PATH = ROOT_PATH + '/data/input'
+
+
 class GroupingRawData:
-    DATA_PARENT_PATH = ROOT_PATH + '/data/spikeprot0308'
-    DATA_RAW_FILE_NAME = 'spikeprot0308.fasta'
-    SPLIT_FILES_DIR_NAME = 'split_data'
-    FILES_NAME_CORE = 'spikeprot_batch_data'
+    DATA_RAW_FILE_NAME = 'spikeprot_shortened.fasta'
     # DIVISION might be: month, quarter, year
     DIVISION_TECHNIQUE = 'month'
-    PERIOD_ROOT_DIR_NAME = 'periods'
     PERIOD_UNIQUE_DIR_NAME = 'unique'
 
 
 class Clustering:
-    DATA_PERIODS_UNIQUE_PATH = f'{GroupingRawData.DATA_PARENT_PATH}/' \
-                               f'{GroupingRawData.SPLIT_FILES_DIR_NAME}/' \
-                               f'{GroupingRawData.PERIOD_ROOT_DIR_NAME}/' \
-                               f'{GroupingRawData.PERIOD_UNIQUE_DIR_NAME}'
-    PROT_VEC_PATH = ROOT_PATH + '/data/spikeprot0308/protVec_100d_3grams2.csv'
-    VECTOR_TEMP_DIR_NAME = 'sequences_as_vectors'
-    VECTOR_TEMP_DIR_PATH = f'{DATA_PERIODS_UNIQUE_PATH}/{VECTOR_TEMP_DIR_NAME}'
-    CLUSTERS_CENTROIDS_DATA_PATH = f'{DATA_PERIODS_UNIQUE_PATH}/clusters_centroids_data.csv'
+    PROT_VEC_PATH = ROOT_PATH + f'{DATA_PARENT_PATH}/protVec_100d_3grams.csv'
+    DATA_PERIODS_UNIQUE_PATH = f'{DATA_PARENT_PATH}/split_data/periods/unique'
 
 
 class CreatingDatasets:
@@ -44,8 +37,8 @@ class CreatingDatasets:
     # DATASET_SIZE = 634000
     DATASET_SIZE = 317 * 40
     EPITOPES_SIMILARITY_THRESHOLD = 0.5
-    DATASETS_MAIN_FILE_PATH = f'{GroupingRawData.DATA_PARENT_PATH}/datasets/period-{GroupingRawData.DIVISION_TECHNIQUE}.csv'
-    DATASETS_DIR_PATH = f'{GroupingRawData.DATA_PARENT_PATH}/datasets'
+    DATASETS_MAIN_FILE_PATH = f'{DATA_PARENT_PATH}/datasets/period-{GroupingRawData.DIVISION_TECHNIQUE}.csv'
+    DATASETS_DIR_PATH = f'{DATA_PARENT_PATH}/datasets'
 
 
 class ClusterToProceed:

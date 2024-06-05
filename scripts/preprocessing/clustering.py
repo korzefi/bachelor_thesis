@@ -7,13 +7,18 @@ import pandas as pd
 from natsort import natsorted
 
 import scripts.utils as utils
-from scripts.preprocessing.config import Clustering, ClusterToProceed
+import scripts.preprocessing.config as cfg
 from scripts.preprocessing import ClusterLinker, ClusterCentroidsDataCreator, EpitopeDataCreator
 
 LOGGING_PROCESSES_ENABLED = True
 
 
 class ProtVecTransformer:
+    data_periods_unique_path = f'{cfg.DATA_PARENT_PATH}/split_data/periods/unique'
+    vector_temp_dir_name = 'sequences_as_vectors'
+    vector_temp_dir_path = f'{data_periods_unique_path}/{vector_temp_dir_name}'
+    clusters_centroids_data_path = f'{data_periods_unique_path}/clusters_centroids_data.csv'
+
     @staticmethod
     def transform_vector(file_num):
         if LOGGING_PROCESSES_ENABLED:
@@ -21,20 +26,20 @@ class ProtVecTransformer:
         logging.info('Transforming sequences')
         files = ProtVecTransformer.__get_files_names()
         files = natsorted(files)
-        prot_vec = pd.read_csv(Clustering.PROT_VEC_PATH)
-        utils.create_dir(Clustering.VECTOR_TEMP_DIR_PATH)
+        prot_vec = pd.read_csv(cfg.Clustering.PROT_VEC_PATH)
+        utils.create_dir(ProtVecTransformer.vector_temp_dir_path)
         files = files[file_num:file_num + 1]
         for file in files:
             logging.info(f'transforming sequences for file: {file}')
-            filepath = f'{Clustering.DATA_PERIODS_UNIQUE_PATH}/{file}'
+            filepath = f'{ProtVecTransformer.data_periods_unique_path}/{file}'
             file_triplets = TripletMaker.createTriplets(filepath)
             file_vec = VectorTransformer.transform(file_triplets, prot_vec)
-            file_vec.to_csv(f'{Clustering.VECTOR_TEMP_DIR_PATH}/{file}', index=False)
+            file_vec.to_csv(f'{ProtVecTransformer.vector_temp_dir_path}/{file}', index=False)
         logging.info('Done')
 
     @staticmethod
     def __get_files_names():
-        return os.listdir(Clustering.DATA_PERIODS_UNIQUE_PATH)
+        return os.listdir(ProtVecTransformer.vector_temp_dir_path)
 
 
 class TripletMaker:
@@ -115,8 +120,8 @@ def transform_vectors_multiprocess(first_file_num, last_file_num):
 
 
 def get_filepath_cluster_dict_for_centroids() -> {}:
-    file_cluster_dict = ClusterToProceed.FILES_CLUSTERS_NUM
-    return {f'{Clustering.VECTOR_TEMP_DIR_PATH}/{file}': cluster for file, cluster in file_cluster_dict.items()}
+    file_cluster_dict = cfg.ClusterToProceed.FILES_CLUSTERS_NUM
+    return {f'{ProtVecTransformer.vector_temp_dir_path}/{file}': cluster for file, cluster in file_cluster_dict.items()}
 
 
 def create_final_data():

@@ -1,15 +1,16 @@
 #!/bin/bash
 
-check_required_bash_version() {
-  local required_bash_version="4.5.0"
-  if [ "$(printf '%s\n' "$required_bash_version" "${BASH_VERSION}" | sort -V | head -n1)" != "required_bash_version" ]; then
-    echo "Update bash version."
-    echo "Required bash version is at least $required_bash_version. Current bash version is ${BASH_VERSION}"
-    exit 1
-  fi
-}
-check_required_bash_version
+#check_required_bash_version() {
+#  local required_bash_version="4.5.0"
+#  if [ "$(printf '%s\n' "$required_bash_version" "${BASH_VERSION}" | sort -V | head -n1)" != "required_bash_version" ]; then
+#    echo "Update bash version."
+#    echo "Required bash version is at least $required_bash_version. Current bash version is ${BASH_VERSION}"
+#    exit 1
+#  fi
+#}
+#check_required_bash_version
 
+ROOT_DIR_NAME="bachelor_thesis"
 BASE_IMAGE_NAME=covid-base:ubuntu
 APP_IMAGE_NAME=covid-app:1.0
 CONTAINER_NAME=covid_mutations
@@ -36,8 +37,13 @@ build_app_image() {
 }
 
 build_images() {
+  echo "Building base image..."
   build_base_image
+  echo "Base image created"
+
+  echo "Building app image..."
   build_app_image
+  echo "App image created"
 }
 
 run_app_container() {

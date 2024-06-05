@@ -8,7 +8,7 @@ if __name__ == '__main__':
     utils.setup_logger()
     # prepare_files()
     # create_cluster_data()
-    train()
+    # train()
     # test()
 
 
