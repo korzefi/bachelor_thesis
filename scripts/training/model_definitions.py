@@ -31,3 +31,4 @@ class AttnRnnModel(nn.Module):
         attn_applied = torch.bmm(attn_weights.unsqueeze(1), out)
         out = self.fc(attn_applied.squeeze(1))
         return out, attn_weights
+

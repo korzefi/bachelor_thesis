@@ -14,3 +14,4 @@ ENV MODEL_PATH=model.pth
 ENV MODEL_TYPE=rnn
 
 CMD ["uvicorn", "scripts.deployment.serve_model:app", "--host", "0.0.0.0", "--port", "8000"]
+
