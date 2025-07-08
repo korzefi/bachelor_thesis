@@ -1,0 +1,5 @@
+# Deployment Configuration
+model_path: /app/model.pth
+model_type: rnn  # options: rnn, attn
+attn_seq_length: null
+port: 8000 

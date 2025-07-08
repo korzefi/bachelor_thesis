@@ -1,0 +1,8 @@
+# Clustering Pipeline Configuration
+input_dir: data/processed/periods
+vector_dir: data/processed/vectors
+cluster_dir: data/processed/clusters
+centroids_csv: data/processed/centroids.csv
+linked_csv: data/processed/linked_clusters.csv
+protvec_path: data/input/protVec_100d_3grams.csv
+n_clusters: 8 

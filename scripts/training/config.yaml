@@ -1,0 +1,10 @@
+# Training Pipeline Configuration
+train_file: data/processed/train.csv
+valid_file: data/processed/valid.csv
+test_file: data/processed/test.csv
+model_out: data/models/model.pth
+model_type: rnn  # options: rnn, attn
+batch_size: 256
+epochs: 20
+lr: 0.001
+attn_seq_length: null 

@@ -1,0 +1,6 @@
+# Inference Pipeline Configuration
+model_type: rnn  # options: rnn, attn
+model_path: data/models/model.pth
+input_file: data/processed/test.csv
+output_file: data/predictions/test_preds.npy
+attn_seq_length: null 
