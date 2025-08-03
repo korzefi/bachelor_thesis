@@ -4,7 +4,12 @@ import logging
 import argparse
 from natsort import natsorted
 
-def clean_csv_dir(csv_dir, min_len=1260, max_len=1280):
+def clean_csv_dir(csv_dir, expected_len=1273, error_margin=0.5):
+    # Compute min_len and max_len from expected_len and error_margin
+    margin = int(expected_len * (error_margin / 100))
+    min_len = expected_len - margin
+    max_len = expected_len + margin
+    
     files = [f for f in os.listdir(csv_dir) if f.endswith('.csv')]
     files = natsorted(files)
     for file in files:
@@ -51,11 +56,11 @@ def remove_duplicates(df):
 def main():
     parser = argparse.ArgumentParser(description="Clean all CSV files in a directory.")
     parser.add_argument('--csv_dir', required=True, help='Directory containing CSV files to clean')
-    parser.add_argument('--min_len', type=int, default=1260, help='Minimum sequence length')
-    parser.add_argument('--max_len', type=int, default=1280, help='Maximum sequence length')
+    parser.add_argument('--expected_len', type=int, default=1273, help='Expected sequence length')
+    parser.add_argument('--error_margin', type=float, default=0.5, help='Error margin percentage')
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
-    clean_csv_dir(args.csv_dir, args.min_len, args.max_len)
+    clean_csv_dir(args.csv_dir, args.expected_len, args.error_margin)
 
 if __name__ == '__main__':
     main()

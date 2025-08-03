@@ -4,7 +4,7 @@
 
 | Pipeline         | Config File Location                        | Key Options (YAML)                                                                                  | Description                                                      |
 |------------------|--------------------------------------------|-----------------------------------------------------------------------------------------------------|------------------------------------------------------------------|
-| Data Engineering | `scripts/data_engineering/config.yaml`      | `input_fasta`, `split_dir`, `csv_dir`, `cleaned_dir`, `periods_dir`, `lines_per_file`, `start_line`, `max_files`, `min_len`, `max_len`, `division` | Paths and parameters for splitting, cleaning, and periodizing    |
+| Data Engineering | `scripts/data_engineering/config.yaml`      | `input_fasta`, `split_dir`, `csv_dir`, `cleaned_dir`, `periods_dir`, `lines_per_file`, `start_line`, `max_files`, `expected_len`, `error_margin`, `division` | Paths and parameters for splitting, cleaning, and periodizing    |
 | Clustering       | `scripts/clustering/config.yaml`            | `input_dir`, `vector_dir`, `cluster_dir`, `centroids_csv`, `linked_csv`, `protvec_path`, `n_clusters` | Paths and clustering parameters                                  |
 | Training         | `scripts/training/config.yaml`              | `train_file`, `valid_file`, `test_file`, `model_out`, `model_type`, `batch_size`, `epochs`, `lr`, `attn_seq_length` | Data, model, and training hyperparameters                        |
 | Inference        | `scripts/training/inference_config.yaml`    | `model_type`, `model_path`, `input_file`, `output_file`, `attn_seq_length`                          | Model and data for batch inference                               |
@@ -26,8 +26,8 @@ periods_dir: data/processed/periods
 lines_per_file: 100000
 start_line: 1
 max_files: 50
-min_len: 1260
-max_len: 1280
+expected_len: 1273
+error_margin: 0.5  # percentage (0.5% = 0.005)
 division: month  # options: month, quarter, year
 ```
 **Run with config:**
@@ -135,6 +135,7 @@ POST http://localhost:8000/predict
 - **All orchestrator scripts** support config files and CLI overrides.
 - **Environment variables** can override deployment config values for Docker/production.
 - **Legacy scripts** are preserved in `old_scripts` folders for reference.
+- **Data Engineering**: `expected_len` and `error_margin` parameters compute min/max length ranges automatically (e.g., expected_len=1273, error_margin=0.5% → range 1267-1279).
 
 If you need **example input data**, **sample config files**, or **step-by-step workflow guides**, see the sections below or contact the maintainers.
 
