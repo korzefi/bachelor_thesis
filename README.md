@@ -27,7 +27,7 @@ lines_per_file: 100000
 start_line: 1
 max_files: 50
 expected_len: 1273
-error_margin: 0.5  # percentage (0.5% = 0.005)
+error_margin: 0.5  # percentage (0.5% of expected length ~= 6)
 division: month  # options: month, quarter, year
 ```
 **Run with config:**

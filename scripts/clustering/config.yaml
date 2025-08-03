@@ -4,5 +4,9 @@ vector_dir: data/processed/vectors
 cluster_dir: data/processed/clusters
 centroids_csv: data/processed/centroids.csv
 linked_csv: data/processed/linked_clusters.csv
+# Path to file with amino acid triplets embedded in 100-dimensional space
+# Asgari E, Mofrad MRK; 2015 PLOS ONE 10(11)
+# Continuous Distributed Representation of Biological Sequences for Deep Proteomics and Genomics. 
+# https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0141287
 protvec_path: data/input/protVec_100d_3grams.csv
-n_clusters: 8 
+n_clusters: 8
