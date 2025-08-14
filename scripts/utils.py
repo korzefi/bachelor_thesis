@@ -25,7 +25,7 @@ def get_formatted_datetime():
     return formatted_datetime
 
 
-def setup_logger(process_id=None, date=True, time=True):
+def setup_logger(process_id=None, date=True, time=True, verbose=False):
     datefmt = "%Y-%m-%d" if date else ""
     timefmt = "%H:%M:%S" if time else ""
     datetimefmt = ""
@@ -39,7 +39,10 @@ def setup_logger(process_id=None, date=True, time=True):
     else:
         process_id = ""
 
-    logging.basicConfig(level=logging.INFO,
+    # Set log level based on verbose flag
+    log_level = logging.DEBUG if verbose else logging.INFO
+    
+    logging.basicConfig(level=log_level,
                         format=f"%(levelname)s{process_id} %(asctime)s: %(message)s",
                         datefmt=datetimefmt)
 
