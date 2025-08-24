@@ -19,6 +19,7 @@ from pathlib import Path
 from natsort import natsorted
 from typing import Dict, List, Tuple
 from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
 
 import scripts.utils as utils
 
@@ -86,15 +87,28 @@ class ClusteringPipeline:
         files = [f for f in os.listdir(self.periods_unique_dir) if f.endswith('.csv')]
         files = natsorted(files)
         
-        # Filter files based on clusters_per_period configuration
-        clusters_per_period = self.cluster_config['clusters_per_period']
-        filtered_files = [f for f in files if f in clusters_per_period]
+        # Check if auto k-selection is enabled
+        auto_k_config = self.cluster_config.get('auto_k_selection', {})
+        auto_k_enabled = auto_k_config.get('enabled', False)
         
-        if not filtered_files:
-            logging.warning("No files match the clusters_per_period configuration")
-            return files  # Return all files if none match config
-        
-        return filtered_files
+        if auto_k_enabled:
+            # Process all CSV files when auto k-selection is enabled
+            return files
+        else:
+            # Filter files based on clusters_per_period configuration (legacy mode)
+            clusters_per_period = self.cluster_config.get('clusters_per_period', {})
+            
+            if not clusters_per_period:
+                logging.warning("No clusters_per_period configuration found, processing all files")
+                return files
+            
+            filtered_files = [f for f in files if f in clusters_per_period]
+            
+            if not filtered_files:
+                logging.warning("No files match the clusters_per_period configuration")
+                return files  # Return all files if none match config
+            
+            return filtered_files
     
     def _transform_sequences_to_vectors_sequential(self, period_files: List[str]) -> None:
         """Transform sequences to vectors sequentially."""
@@ -191,6 +205,45 @@ class ClusteringPipeline:
         
         return result_df
     
+    def _find_optimal_k(self, vectors_df: pd.DataFrame) -> int:
+        """Find optimal number of clusters using Silhouette Score."""
+        # Get k range from config or use defaults
+        auto_k_config = self.cluster_config.get('auto_k_selection', {})
+        min_k = auto_k_config.get('min_k', 2)
+        max_k = auto_k_config.get('max_k', 15)
+        
+        # Ensure we don't try more clusters than we have data points
+        n_samples = len(vectors_df)
+        max_k = min(max_k, n_samples - 1)
+        
+        if min_k >= n_samples:
+            logging.warning(f"Not enough samples ({n_samples}) for clustering. Using k=1")
+            return 1
+        
+        best_k = min_k
+        best_score = -1
+        
+        logging.debug(f"Finding optimal k in range [{min_k}, {max_k}] for {n_samples} samples")
+        
+        vectors_array = vectors_df.to_numpy()
+        
+        for k in range(min_k, max_k + 1):
+            # Fit K-means
+            kmeans = KMeans(n_clusters=k, n_init=10, max_iter=300, random_state=42)
+            labels = kmeans.fit_predict(vectors_array)
+            
+            # Calculate silhouette score
+            score = silhouette_score(vectors_array, labels)
+            
+            logging.debug(f"k={k}: silhouette_score={score:.4f}")
+            
+            if score > best_score:
+                best_score = score
+                best_k = k
+        
+        logging.info(f"Optimal k={best_k} with silhouette_score={best_score:.4f}")
+        return best_k
+    
     def _create_clusters_for_periods(self) -> None:
         """Create clusters for each period using K-means."""
         logging.info("Creating clusters for each period...")
@@ -198,32 +251,70 @@ class ClusteringPipeline:
         # Initialize centroids file
         self._initialize_centroids_file()
         
-        clusters_per_period = self.cluster_config['clusters_per_period']
+        # Check if auto k-selection is enabled
+        auto_k_config = self.cluster_config.get('auto_k_selection', {})
+        auto_k_enabled = auto_k_config.get('enabled', False)
         
-        for period_file, n_clusters in clusters_per_period.items():
-            logging.info(f"Creating {n_clusters} clusters for {period_file}")
+        if auto_k_enabled:
+            # Use automatic k-finding for all vector files
+            vector_files = [f for f in os.listdir(self.vector_temp_dir) if f.endswith('.csv')]
+            vector_files = natsorted(vector_files)
             
-            vector_file_path = f"{self.vector_temp_dir}/{period_file}"
+            for period_file in vector_files:
+                logging.info(f"Processing {period_file} with automatic k-selection")
+                
+                vector_file_path = f"{self.vector_temp_dir}/{period_file}"
+                
+                # Load vectors
+                vectors_df = pd.read_csv(vector_file_path)
+                
+                if vectors_df.empty:
+                    logging.warning(f"Empty vector file: {period_file}")
+                    continue
+                
+                # Find optimal k
+                n_clusters = self._find_optimal_k(vectors_df)
+                logging.info(f"Using {n_clusters} clusters for {period_file}")
+                
+                # Create clusters
+                cluster_results = self._create_kmeans_clusters(vectors_df, n_clusters)
+                
+                # Save cluster labels to original period file
+                self._save_cluster_labels(period_file, cluster_results['labels'])
+                
+                # Save centroids
+                self._save_centroids(period_file, cluster_results['centroids'])
+        else:
+            # Use manual clusters_per_period configuration (legacy mode)
+            clusters_per_period = self.cluster_config.get('clusters_per_period', {})
             
-            if not os.path.exists(vector_file_path):
-                logging.warning(f"Vector file not found: {vector_file_path}")
-                continue
+            if not clusters_per_period:
+                raise ValueError("Either enable auto_k_selection or provide clusters_per_period configuration")
             
-            # Load vectors
-            vectors_df = pd.read_csv(vector_file_path)
-            
-            if vectors_df.empty:
-                logging.warning(f"Empty vector file: {period_file}")
-                continue
-            
-            # Create clusters
-            cluster_results = self._create_kmeans_clusters(vectors_df, n_clusters)
-            
-            # Save cluster labels to original period file
-            self._save_cluster_labels(period_file, cluster_results['labels'])
-            
-            # Save centroids
-            self._save_centroids(period_file, cluster_results['centroids'])
+            for period_file, n_clusters in clusters_per_period.items():
+                logging.info(f"Creating {n_clusters} clusters for {period_file}")
+                
+                vector_file_path = f"{self.vector_temp_dir}/{period_file}"
+                
+                if not os.path.exists(vector_file_path):
+                    logging.warning(f"Vector file not found: {vector_file_path}")
+                    continue
+                
+                # Load vectors
+                vectors_df = pd.read_csv(vector_file_path)
+                
+                if vectors_df.empty:
+                    logging.warning(f"Empty vector file: {period_file}")
+                    continue
+                
+                # Create clusters
+                cluster_results = self._create_kmeans_clusters(vectors_df, n_clusters)
+                
+                # Save cluster labels to original period file
+                self._save_cluster_labels(period_file, cluster_results['labels'])
+                
+                # Save centroids
+                self._save_centroids(period_file, cluster_results['centroids'])
         
         logging.info("Cluster creation completed for all periods")
     

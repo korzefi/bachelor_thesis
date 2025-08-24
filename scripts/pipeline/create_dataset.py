@@ -381,23 +381,15 @@ class DatasetCreationPipeline:
         
         df = pd.read_csv(file_path)
         
-        # First try to get sequences with expected length (1274 with asterisk)
-        expected_len = 1274
-        cluster_sequences = df[
-            (df['cluster'] == cluster) & 
-            (df['sequence'].str.len() == expected_len)
-        ]
-        
-        # If no sequences with expected length, get any from the cluster
-        if cluster_sequences.empty:
-            cluster_sequences = df[df['cluster'] == cluster]
+        # Get sequences from the cluster (no hardcoded length filter)
+        cluster_sequences = df[df['cluster'] == cluster]
         
         if cluster_sequences.empty:
             raise DatasetCreationError(f"No sequences found for cluster {cluster} in period {period}")
         
         # Return random sequence
         chosen_sequence = cluster_sequences.sample(n=1).iloc[0]['sequence']
-        return chosen_sequence
+        return str(chosen_sequence)  # Ensure return type is str
     
     def _is_mutated_too_much(self, prev_sequence: str, current_sequence: str) -> bool:
         """Check if sequences are mutated beyond threshold in epitope regions."""

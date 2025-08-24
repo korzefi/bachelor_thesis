@@ -1,6 +1,6 @@
-# SARS-CoV-2 Spike Protein Mutation Prediction Pipeline
+# Protein Mutation Prediction Pipeline
 
-A comprehensive, modular pipeline for predicting amino acid mutations in SARS-CoV-2 Spike protein using recurrent neural networks. This research focuses on understanding temporal mutation patterns through advanced machine learning techniques.
+A comprehensive, automated, and generalizable pipeline for predicting amino acid mutations in proteins using recurrent neural networks. Originally designed for SARS-CoV-2 Spike protein, the pipeline now supports any protein with minimal configuration changes. This research focuses on understanding temporal mutation patterns through advanced machine learning techniques.
 
 ## 🚀 Quick Start
 
@@ -12,13 +12,13 @@ pip install -r requirements.txt
 pip install -r requirements-dev.txt  # For development tools
 
 # 2. Run the complete pipeline
-python main.py --config configs/sars_cov_2_default.yaml --full
+python main.py full-pipeline --config configs/sars_cov_2_default.yaml
 
 # 3. Or run individual steps
-python main.py --prepare     # Data preparation
-python main.py --cluster     # Sequence clustering  
-python main.py --train       # Model training
-python main.py --test        # Model evaluation
+python main.py prepare --config configs/sars_cov_2_default.yaml    # Data preparation
+python main.py cluster --config configs/sars_cov_2_default.yaml    # Sequence clustering  
+python main.py dataset --config configs/sars_cov_2_default.yaml    # Dataset creation
+python main.py train --config configs/sars_cov_2_default.yaml      # Model training
 ```
 
 ### Docker Deployment
@@ -71,16 +71,37 @@ bachelor_thesis/
 
 ## 🔧 Configuration
 
-The pipeline is fully configurable through YAML files. The default configuration (`configs/sars_cov_2_default.yaml`) includes:
+The pipeline is fully configurable through YAML files and supports both **automated** and **manual** modes for maximum flexibility. The default configuration (`configs/sars_cov_2_default.yaml`) includes:
 
 - **Data paths**: Input files, intermediate processing directories, output locations
+- **Automated features**: Auto-detection of sequence lengths, automatic optimal cluster determination
 - **Pipeline parameters**: Clustering settings, epitope definitions, window sizes
 - **Model configuration**: Architecture selection, hyperparameters, training settings
 - **Evaluation settings**: Metrics, visualization options, model saving strategies
 
+### 🤖 Automation Features
+
+- **Automatic Cluster Optimization**: Uses Silhouette Score to find optimal number of clusters
+- **Auto-Detection of Sequence Lengths**: No need to manually specify expected sequence lengths
+- **Generalized Protein Support**: Easy adaptation to proteins other than SARS-CoV-2
+
 ### Key Configuration Sections
 
 ```yaml
+# Automated clustering
+cluster:
+  auto_k_selection:
+    enabled: true    # Enable automatic cluster optimization
+    min_k: 2         # Minimum number of clusters to test
+    max_k: 15        # Maximum number of clusters to test
+  
+# Automated sequence processing
+prepare:
+  fasta_prefix: "batch_data"  # Configurable filename prefix
+  clean_sequences:
+    expected_len: null        # Auto-detect from data (set to number for manual mode)
+    error_margin: 13          # Length variation tolerance
+
 # Model selection and training
 train:
   model_type: 'AttentionRNN'  # 'RNN', 'AttentionRNN', 'DualAttentionRNN', or 'custom'
@@ -91,12 +112,6 @@ train:
       learning_rate: 0.0005
       batch_size: 256
       epochs: 200
-
-# Model saving strategy
-model_saving:
-  strategy: 'both'           # 'best', 'threshold', or 'both'
-  mcc_threshold: 0.3         # Save models above this MCC score
-  always_save_best: true     # Always save the best performing model
 ```
 
 ## 🧬 Pipeline Overview

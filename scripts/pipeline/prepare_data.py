@@ -115,7 +115,9 @@ class DataPreparationPipeline:
             
             logging.info(f"Batch {i+1}/{actual_batches}: lines {current_start}-{current_end}")
             
-            output_file = f"{temp_fasta_dir}/spikeprot_batch_data-{current_start}-{current_end}.fasta"
+            # Get configurable filename prefix
+            fasta_prefix = self.prepare_config.get('fasta_prefix', 'batch_data')
+            output_file = f"{temp_fasta_dir}/{fasta_prefix}-{current_start}-{current_end}.fasta"
             
             # Use sed to extract lines
             cmd = f"sed -n '{current_start},{current_end}p' {raw_fasta_path} > {output_file}"
@@ -171,14 +173,23 @@ class DataPreparationPipeline:
         temp_csv_dir = self.data_config['temp_csv_dir']
         clean_config = self.prepare_config['clean_sequences']
         
-        expected_len = clean_config['expected_len']
-        error_margin = clean_config['error_margin']
-        min_len = expected_len - error_margin
-        max_len = expected_len + error_margin
-        
         # Get all CSV files
         csv_files = [f for f in os.listdir(temp_csv_dir) if f.endswith('.csv')]
         csv_files = natsorted(csv_files)
+        
+        # Determine expected length and margins
+        if 'expected_len' in clean_config and clean_config['expected_len'] is not None:
+            # Use manually configured expected length
+            expected_len = clean_config['expected_len']
+            error_margin = clean_config.get('error_margin', 10)
+            min_len = expected_len - error_margin
+            max_len = expected_len + error_margin
+            logging.info(f"Using configured expected length: {expected_len} ±{error_margin}")
+        else:
+            # Auto-detect expected length from data
+            logging.info("Auto-detecting expected sequence length from data...")
+            expected_len, min_len, max_len = self._auto_detect_sequence_length(csv_files, temp_csv_dir, clean_config)
+            logging.info(f"Auto-detected expected length: {expected_len} (range: {min_len}-{max_len})")
         
         for i, csv_file in enumerate(csv_files, 1):
             logging.info(f"Cleaning file {i}/{len(csv_files)}: {csv_file}")
@@ -296,6 +307,50 @@ class DataPreparationPipeline:
         logging.info("Unique sequence files creation completed.")
     
     # Helper methods
+    
+    def _auto_detect_sequence_length(self, csv_files: List[str], temp_csv_dir: str, clean_config: Dict) -> tuple:
+        """Auto-detect expected sequence length from data sample."""
+        all_lengths = []
+        sample_size = min(len(csv_files), 5)  # Sample first 5 files
+        
+        logging.info(f"Sampling {sample_size} files to determine sequence length distribution...")
+        
+        for csv_file in csv_files[:sample_size]:
+            csv_path = f"{temp_csv_dir}/{csv_file}"
+            df = pd.read_csv(csv_path)
+            
+            # Remove ambiguous sequences first for cleaner length detection
+            df = self._remove_ambiguous_amino_acids(df)
+            
+            # Get sequence lengths
+            lengths = df['sequence'].str.len().tolist()
+            all_lengths.extend(lengths)
+        
+        if not all_lengths:
+            raise ValueError("No valid sequences found for length detection")
+        
+        # Calculate statistics
+        all_lengths = pd.Series(all_lengths)
+        median_len = int(all_lengths.median())
+        mode_len = int(all_lengths.mode()[0]) if not all_lengths.mode().empty else median_len
+        std_len = all_lengths.std()
+        
+        logging.info(f"Length statistics - Median: {median_len}, Mode: {mode_len}, StdDev: {std_len:.2f}")
+        
+        # Use mode as expected length, fallback to median
+        expected_len = mode_len
+        
+        # Calculate error margin: use configured margin or auto-calculate
+        if 'error_margin' in clean_config:
+            error_margin = clean_config['error_margin']
+        else:
+            # Use 2 standard deviations or minimum of 10
+            error_margin = max(int(2 * std_len), 10)
+        
+        min_len = expected_len - error_margin
+        max_len = expected_len + error_margin
+        
+        return expected_len, min_len, max_len
     
     def _get_file_line_count(self, file_path: str) -> int:
         """Get the number of lines in a file."""
