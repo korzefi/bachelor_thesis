@@ -17,6 +17,7 @@ import subprocess
 import shutil
 import pandas as pd
 import logging
+import random
 from pathlib import Path
 from natsort import natsorted
 from typing import Dict, List
@@ -92,6 +93,7 @@ class DataPreparationPipeline:
         logging.info("Splitting FASTA files into batches...")
         
         split_config = self.prepare_config['split_fasta']
+        start_line = split_config.get('start_line', 1)
         lines_per_file = split_config['lines_per_file']
         max_files = split_config['max_files']
         
@@ -101,15 +103,17 @@ class DataPreparationPipeline:
         # Get total number of lines in the raw file
         total_lines = self._get_file_line_count(raw_fasta_path)
         logging.info(f"Total lines in raw file: {total_lines}")
+        logging.info(f"Starting from line: {start_line}")
         
-        # Calculate how many files we need, processing the entire file
-        total_batches_needed = (total_lines + lines_per_file - 1) // lines_per_file  # Ceiling division
+        # Calculate how many files we can create from the starting position
+        remaining_lines = total_lines - start_line + 1
+        total_batches_needed = (remaining_lines + lines_per_file - 1) // lines_per_file  # Ceiling division
         actual_batches = min(max_files, total_batches_needed)
         
-        logging.info(f"Processing entire file in {actual_batches} batches of up to {lines_per_file} lines each")
+        logging.info(f"Processing {remaining_lines} lines in {actual_batches} batches of up to {lines_per_file} lines each")
         
-        # Split the file starting from line 1
-        current_start = 1
+        # Split the file starting from the configured start_line
+        current_start = start_line
         for i in range(actual_batches):
             current_end = min(current_start + lines_per_file - 1, total_lines)
             
@@ -127,6 +131,13 @@ class DataPreparationPipeline:
             
             if current_start > total_lines:
                 break
+        
+        # Calculate and log the next start_line for subsequent runs
+        next_start_line = start_line + (actual_batches * lines_per_file)
+        if next_start_line <= total_lines:
+            logging.info(f"For next run, use start_line: {next_start_line}")
+        else:
+            logging.info("File processing completed. No more lines to process.")
         
         logging.info(f"FASTA file splitting completed. Created {actual_batches} batch files.")
     
@@ -311,20 +322,35 @@ class DataPreparationPipeline:
     def _auto_detect_sequence_length(self, csv_files: List[str], temp_csv_dir: str, clean_config: Dict) -> tuple:
         """Auto-detect expected sequence length from data sample."""
         all_lengths = []
-        sample_size = min(len(csv_files), 5)  # Sample first 5 files
+        sample_size = min(len(csv_files), 10)  # Sample 10 files randomly
         
-        logging.info(f"Sampling {sample_size} files to determine sequence length distribution...")
+        # Randomly select files instead of taking the first ones
+        sampled_files = random.sample(csv_files, sample_size)
         
-        for csv_file in csv_files[:sample_size]:
+        logging.info(f"Sampling {sample_size} randomly selected files to determine sequence length distribution...")
+        
+        max_sequences = 1000000
+        sequences_collected = 0
+        
+        for csv_file in sampled_files:
+            if sequences_collected >= max_sequences:
+                break
+                
             csv_path = f"{temp_csv_dir}/{csv_file}"
             df = pd.read_csv(csv_path)
             
             # Remove ambiguous sequences first for cleaner length detection
             df = self._remove_ambiguous_amino_acids(df)
             
+            # Randomly sample sequences from this file if needed
+            remaining_slots = max_sequences - sequences_collected
+            if len(df) > remaining_slots:
+                df = df.sample(n=remaining_slots, random_state=42)
+            
             # Get sequence lengths
             lengths = df['sequence'].str.len().tolist()
             all_lengths.extend(lengths)
+            sequences_collected += len(lengths)
         
         if not all_lengths:
             raise ValueError("No valid sequences found for length detection")

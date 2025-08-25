@@ -12,13 +12,13 @@ pip install -r requirements.txt
 pip install -r requirements-dev.txt  # For development tools
 
 # 2. Run the complete pipeline
-python main.py full-pipeline --config configs/sars_cov_2_default.yaml
+python main.py --config configs/sars_cov_2_default.yaml full-pipeline
 
 # 3. Or run individual steps
-python main.py prepare --config configs/sars_cov_2_default.yaml    # Data preparation
-python main.py cluster --config configs/sars_cov_2_default.yaml    # Sequence clustering  
-python main.py dataset --config configs/sars_cov_2_default.yaml    # Dataset creation
-python main.py train --config configs/sars_cov_2_default.yaml      # Model training
+python main.py --config configs/sars_cov_2_default.yaml prepare    # Data preparation
+python main.py --config configs/sars_cov_2_default.yaml cluster    # Sequence clustering  
+python main.py --config configs/sars_cov_2_default.yaml dataset    # Dataset creation
+python main.py --config configs/sars_cov_2_default.yaml train      # Model training
 ```
 
 ### Docker Deployment
@@ -272,7 +272,7 @@ python -m scripts.pipeline.create_clusters
 
 ### Data Requirements
 - Input FASTA files should be placed in `data/input/`
-- ProtVec embeddings file: `protVec_100d_3grams.csv` required
+- ProtVec embeddings file: `protVec_100d_3grams.csv` required (must use **tab-separated** format)
 - Sufficient disk space for intermediate processing files
 
 ### Performance Considerations

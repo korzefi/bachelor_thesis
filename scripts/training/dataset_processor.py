@@ -45,7 +45,7 @@ class DatasetProcessor:
         if not Path(self.prot_vec_file).exists():
             raise FileNotFoundError(f"ProtVec file not found: {self.prot_vec_file}")
         
-        prot_vec_df = pd.read_csv(self.prot_vec_file)
+        prot_vec_df = pd.read_csv(self.prot_vec_file, sep='\t')
         self.trigram_vecs = prot_vec_df.loc[:, prot_vec_df.columns != 'words'].values
         
         logging.info(f"Loaded ProtVec embeddings: {self.trigram_vecs.shape}")

@@ -53,7 +53,7 @@ class ClusteringPipeline:
     def _load_prot_vec_embeddings(self) -> pd.DataFrame:
         """Load ProtVec 100-dimensional embeddings."""
         logging.info(f"Loading ProtVec embeddings from: {self.prot_vec_path}")
-        return pd.read_csv(self.prot_vec_path)
+        return pd.read_csv(self.prot_vec_path, sep='\t')
     
     def run(self) -> None:
         """Execute the complete clustering pipeline."""

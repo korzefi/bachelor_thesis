@@ -81,7 +81,7 @@ class DatasetCreationPipeline:
     def _load_prot_vec_embeddings(self) -> pd.DataFrame:
         """Load ProtVec embeddings."""
         logging.info(f"Loading ProtVec embeddings from: {self.prot_vec_file}")
-        return pd.read_csv(self.prot_vec_file)
+        return pd.read_csv(self.prot_vec_file, sep='\t')
     
     def _create_output_directory(self) -> None:
         """Create output directory for the dataset."""
