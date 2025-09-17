@@ -23,6 +23,186 @@ from sklearn.utils import shuffle
 from typing import Dict, List, Tuple, Any
 
 import scripts.utils as utils
+from scripts.utils import BatchProcessor, DataFrameChunker
+
+
+class BatchDatasetProcessor(BatchProcessor):
+    """Batch processor for streaming dataset creation."""
+    
+    def __init__(self, config: Dict, epitopes_positions: List[int], window_size: int):
+        memory_config = config.get('memory_optimization', {})
+        batch_size = memory_config.get('dataset_creation_batch_size', 100)
+        super().__init__(config, batch_size, "BatchDatasetProcessor")
+        
+        self.epitopes_positions = epitopes_positions
+        self.window_size = window_size
+        self.temp_dir = None
+        self.output_file = None
+        
+        # ProtVec batch size for transformation
+        self.protvec_batch_size = memory_config.get('protvec_batch_size', 50)
+    
+    def setup_output_file(self, output_path: str):
+        """Setup output file for streaming results."""
+        self.output_file = output_path
+        self.temp_dir = f"{output_path}_temp"
+        utils.create_dir(self.temp_dir)
+        
+        # Remove existing output file if it exists
+        if os.path.exists(output_path):
+            os.remove(output_path)
+    
+    def process_batch(self, batch_samples: List[List[str]]) -> pd.DataFrame:
+        """Process a batch of sequence samples into dataset format."""
+        # Extract epitopes with context from batch
+        epitope_samples = self._extract_epitopes_with_context_batch(batch_samples)
+        
+        # Transform to ProtVec indices in sub-batches
+        protvec_samples = self._transform_to_protvec_indices_batch(epitope_samples)
+        
+        # Create final dataframe from batch
+        dataset_df = self._create_dataframe_from_batch(protvec_samples)
+        
+        return dataset_df
+    
+    def save_batch_result(self, dataset_df: pd.DataFrame, batch_index: int) -> None:
+        """Save batch result incrementally to final output file."""
+        if self.output_file and not dataset_df.empty:
+            DataFrameChunker.write_csv_incrementally(
+                dataset_df, 
+                self.output_file, 
+                mode='a'
+            )
+    
+    def _extract_epitopes_with_context_batch(self, batch_samples: List[List[str]]) -> List[List[List[str]]]:
+        """Extract epitope regions with context from batch of samples."""
+        epitope_samples = []
+        
+        for sample in batch_samples:
+            sample_epitopes = []
+            for sequence in sample:
+                # Remove asterisk if present
+                if sequence.endswith('*'):
+                    sequence = sequence[:-1]
+                
+                sequence_epitopes = []
+                for position in self.epitopes_positions:
+                    context_size = 2  # From config
+                    start_pos = max(0, position - context_size)
+                    end_pos = min(len(sequence), position + context_size + 1)
+                    epitope_context = sequence[start_pos:end_pos]
+                    sequence_epitopes.append(epitope_context)
+                
+                sample_epitopes.append(sequence_epitopes)
+            epitope_samples.append(sample_epitopes)
+        
+        return epitope_samples
+    
+    def _transform_to_protvec_indices_batch(self, epitope_samples: List[List[List[str]]]) -> List[List[List[List[int]]]]:
+        """Transform epitope contexts to ProtVec indices in small sub-batches."""
+        protvec_samples = []
+        
+        # Process in smaller sub-batches to control memory
+        for i in range(0, len(epitope_samples), self.protvec_batch_size):
+            batch_end = min(i + self.protvec_batch_size, len(epitope_samples))
+            sub_batch = epitope_samples[i:batch_end]
+            
+            for sample_idx, sample in enumerate(sub_batch):
+                sample_protvec = []
+                for sequence_epitopes in sample:
+                    sequence_protvec = []
+                    for epitope_context in sequence_epitopes:
+                        # Create triplets from epitope context
+                        triplets = self._create_triplets_from_epitope(epitope_context)
+                        # Convert triplets to ProtVec indices
+                        triplet_indices = self._triplets_to_indices(triplets)
+                        sequence_protvec.append(triplet_indices)
+                    sample_protvec.append(sequence_protvec)
+                protvec_samples.append(sample_protvec)
+        
+        return protvec_samples
+    
+    def _create_dataframe_from_batch(self, protvec_samples: List[List[List[List[int]]]]) -> pd.DataFrame:
+        """Create DataFrame from batch of ProtVec samples."""
+        if not protvec_samples:
+            columns = ['y'] + [str(i) for i in range(self.window_size)]
+            return pd.DataFrame(columns=columns)
+        
+        # Pre-allocate list for rows
+        all_rows = []
+        
+        for sample in protvec_samples:
+            epitopes_count = len(sample[0])  # Number of epitope positions
+            
+            for epitope_idx in range(epitopes_count):
+                row_data = []
+                
+                # Collect data for this epitope position across all sequences in the sample
+                for sequence_idx in range(len(sample)):
+                    if epitope_idx < len(sample[sequence_idx]):
+                        row_data.append(sample[sequence_idx][epitope_idx])
+                    else:
+                        row_data.append([])  # Empty if epitope not available
+                
+                # Create row for dataset
+                dataset_row = self._create_dataset_row(row_data)
+                all_rows.append(dataset_row)
+        
+        # Create DataFrame from all rows
+        columns = ['y'] + [str(i) for i in range(self.window_size)]
+        return pd.DataFrame(all_rows, columns=columns)
+    
+    def _create_triplets_from_epitope(self, epitope_context: str) -> List[str]:
+        """Create 3-grams from epitope context."""
+        context_size = 2  # From config
+        sites_per_position = 1 + (2 * context_size)
+        triplets_num = sites_per_position - 2
+        
+        if len(epitope_context) < 3:
+            return []
+        
+        triplets = [epitope_context[i:i+3] for i in range(min(triplets_num, len(epitope_context) - 2))]
+        return triplets
+    
+    def _triplets_to_indices(self, triplets: List[str]) -> List[int]:
+        """Convert triplets to ProtVec indices using lookup (placeholder)."""
+        # This will be initialized with triplet_to_index from parent class
+        indices = []
+        for triplet in triplets:
+            if hasattr(self, 'triplet_to_index') and triplet in self.triplet_to_index:
+                indices.append(self.triplet_to_index[triplet])
+            else:
+                indices.append(0)  # Default for unknown triplets
+        return indices
+    
+    def _create_dataset_row(self, row_data: List[List[int]]) -> List:
+        """Create a single dataset row with mutation label."""
+        # Separate target (y) from input sequences (x)
+        input_sequences = row_data[:-1]
+        target_sequence = row_data[-1]
+        
+        # Create mutation label
+        if len(input_sequences) > 0:
+            last_input_sequence = input_sequences[-1]
+            # Check if target is similar to last input (mutation detection)
+            mutation_label = 0 if self._sequences_similar(last_input_sequence, target_sequence) else 1
+        else:
+            mutation_label = 0
+        
+        # Convert lists to strings for DataFrame compatibility
+        input_sequences_str = [str(seq) for seq in input_sequences]
+        
+        # Create final row
+        result_row = [mutation_label] + input_sequences_str
+        return result_row
+    
+    def _sequences_similar(self, seq1: List[int], seq2: List[int]) -> bool:
+        """Check if two sequences are similar (have 3 or more matching elements)."""
+        if not seq1 or not seq2:
+            return True
+        
+        matching_elements = len(set(seq1) & set(seq2))
+        return matching_elements >= 3
 
 
 class DatasetCreationError(Exception):
@@ -52,6 +232,9 @@ class DatasetCreationPipeline:
         self.epitopes_similarity_threshold = self.dataset_config['epitopes_similarity_threshold']
         self.dataset_size = self.dataset_config['dataset_size']
         
+        # Duplication factor to compensate for duplicate removal
+        self.duplication_factor = self.dataset_config.get('duplication_factor', 20)
+        
         # Parse epitope positions
         self.epitopes_positions = self._parse_epitope_positions(self.dataset_config['epitopes'])
         self.max_similar_epitopes = int(len(self.epitopes_positions) * self.epitopes_similarity_threshold)
@@ -64,6 +247,14 @@ class DatasetCreationPipeline:
         
         # Load ProtVec embeddings
         self.prot_vec_df = self._load_prot_vec_embeddings()
+        
+        # Initialize batch processor for streaming dataset creation
+        self.batch_dataset_processor = BatchDatasetProcessor(
+            config, self.epitopes_positions, self.window_size
+        )
+        
+        # Share ProtVec lookup with batch processor
+        self.batch_dataset_processor.triplet_to_index = self.triplet_to_index
         
         # Create output directory
         self._create_output_directory()
@@ -81,7 +272,15 @@ class DatasetCreationPipeline:
     def _load_prot_vec_embeddings(self) -> pd.DataFrame:
         """Load ProtVec embeddings."""
         logging.info(f"Loading ProtVec embeddings from: {self.prot_vec_file}")
-        return pd.read_csv(self.prot_vec_file, sep='\t')
+        df = pd.read_csv(self.prot_vec_file, sep='\t')
+        
+        # Create lookup dictionary for faster triplet-to-index mapping
+        self.triplet_to_index = {}
+        for idx, row in df.iterrows():
+            self.triplet_to_index[row['words']] = idx
+        
+        logging.info(f"Created lookup dictionary with {len(self.triplet_to_index)} triplets")
+        return df
     
     def _create_output_directory(self) -> None:
         """Create output directory for the dataset."""
@@ -109,6 +308,7 @@ class DatasetCreationPipeline:
     def _run_single_pass(self) -> None:
         """Run dataset creation without refilling."""
         dataset_df = self._create_dataset()
+        dataset_df, duplicate_rate = self._remove_duplicates(dataset_df)
         self._save_dataset(dataset_df)
         
         # Log statistics
@@ -118,6 +318,7 @@ class DatasetCreationPipeline:
         
         logging.info(f"Created dataset with {total_samples} samples")
         logging.info(f"Mutation ratio: {mutation_ratio:.3f} ({mutated_samples}/{total_samples})")
+        logging.info(f"Final duplicate rate: {duplicate_rate:.1%}")
     
     def _run_with_refilling(self) -> None:
         """Run dataset creation with iterative refilling to achieve target ratio."""
@@ -129,7 +330,10 @@ class DatasetCreationPipeline:
         
         # Create initial dataset
         dataset_df = self._create_dataset()
-        dataset_df = self._remove_duplicates(dataset_df)
+        dataset_df, initial_duplicate_rate = self._remove_duplicates(dataset_df)
+        
+        # Track duplicate rates for adaptive generation
+        duplicate_rates = [initial_duplicate_rate]
         
         for iteration in range(1, max_iterations + 1):
             # Calculate current statistics
@@ -140,21 +344,28 @@ class DatasetCreationPipeline:
             logging.info(f"Iteration {iteration}/{max_iterations}: {total_samples} samples, "
                         f"mutation ratio: {current_ratio:.3f}")
             
-            # Check if target ratio is achieved
-            if current_ratio >= target_ratio:
-                logging.info(f"Target mutation ratio {target_ratio} achieved!")
+            # Check if target dataset size is achieved
+            if total_samples >= self.dataset_size:
+                logging.info(f"Target dataset size {self.dataset_size} achieved!")
                 break
             
             # Calculate how many more samples we need
             needed_samples = self.dataset_size - total_samples
             if needed_samples > 0:
+                # Adjust duplication factor based on observed duplicate rates
+                avg_duplicate_rate = sum(duplicate_rates) / len(duplicate_rates)
+                if avg_duplicate_rate > 0.8:  # If >80% duplicates, increase factor
+                    self.duplication_factor = min(50, int(self.duplication_factor * 1.5))
+                    logging.info(f"High duplicate rate ({avg_duplicate_rate:.1%}), increasing duplication factor to {self.duplication_factor}")
+                
                 # Create additional samples
                 self.current_dataset_size = needed_samples
                 additional_df = self._create_dataset()
                 
                 # Combine datasets and remove duplicates
                 dataset_df = pd.concat([dataset_df, additional_df], ignore_index=True)
-                dataset_df = self._remove_duplicates(dataset_df)
+                dataset_df, iteration_duplicate_rate = self._remove_duplicates(dataset_df)
+                duplicate_rates.append(iteration_duplicate_rate)
         
         # Save final dataset
         self._save_dataset(dataset_df)
@@ -163,9 +374,12 @@ class DatasetCreationPipeline:
         total_samples = len(dataset_df)
         mutated_samples = len(dataset_df[dataset_df['y'] == 1])
         final_ratio = mutated_samples / total_samples if total_samples > 0 else 0
+        avg_duplicate_rate = sum(duplicate_rates) / len(duplicate_rates) if duplicate_rates else 0
         
         logging.info(f"Final dataset: {total_samples} samples, "
                     f"mutation ratio: {final_ratio:.3f} ({mutated_samples}/{total_samples})")
+        logging.info(f"Average duplicate rate: {avg_duplicate_rate:.1%}")
+        logging.info(f"Final duplication factor: {self.duplication_factor}")
     
     def _create_dataset(self) -> pd.DataFrame:
         """Create the main dataset."""
@@ -221,15 +435,28 @@ class DatasetCreationPipeline:
     
     def _create_sequence_samples(self, centroids_df: pd.DataFrame, windows: List[Dict]) -> List[List[str]]:
         """Create sequence samples by linking clusters across windows."""
-        # Calculate number of samples needed
+        # Calculate number of sequence samples needed
+        # Each sequence sample creates one row per epitope position in final dataset
         epitopes_pos_num = len(set(self.epitopes_positions))  # Unique epitope positions
         total_dataset_size = getattr(self, 'current_dataset_size', self.dataset_size)
-        samples_per_position = total_dataset_size // epitopes_pos_num
-        samples_per_window = max(1, samples_per_position // len(windows))
         
+        # Total sequence samples needed = target dataset size / epitopes per sample
+        # Apply duplication factor to compensate for duplicate removal
+        base_sequence_samples_needed = total_dataset_size // epitopes_pos_num
+        total_sequence_samples_needed = int(base_sequence_samples_needed * self.duplication_factor)
+        samples_per_window = max(1, total_sequence_samples_needed // len(windows))
+        
+        logging.info(f"Unique epitope positions: {epitopes_pos_num}")
+        logging.info(f"Target dataset size: {total_dataset_size}")
+        logging.info(f"Base sequence samples needed: {base_sequence_samples_needed}")
+        logging.info(f"Duplication factor: {self.duplication_factor}")
+        logging.info(f"Total sequence samples needed (with duplication factor): {total_sequence_samples_needed}")
         logging.info(f"Creating {samples_per_window} samples per window, {len(windows)} windows")
+        logging.info(f"Expected total sequence samples: {samples_per_window * len(windows)}")
+        logging.info(f"Expected pre-deduplication rows: {samples_per_window * len(windows)} × {epitopes_pos_num} = {samples_per_window * len(windows) * epitopes_pos_num}")
         
         sequence_samples = []
+        failed_samples = 0
         
         for window_idx, window in enumerate(windows):
             logging.info(f"Processing window {window_idx + 1}/{len(windows)}: {window}")
@@ -239,22 +466,31 @@ class DatasetCreationPipeline:
                     sample = self._create_single_sample(centroids_df, window)
                     sequence_samples.append(sample)
                 except Exception as e:
+                    failed_samples += 1
                     logging.warning(f"Failed to create sample {sample_idx + 1} for window {window_idx + 1}: {e}")
                     continue
         
         # Add remaining samples to last window if needed
-        remaining_samples = samples_per_position - len(sequence_samples)
+        remaining_samples = total_sequence_samples_needed - len(sequence_samples)
         if remaining_samples > 0 and windows:
+            logging.info(f"Creating {remaining_samples} additional samples in last window")
             last_window = windows[-1]
             for i in range(remaining_samples):
                 try:
                     sample = self._create_single_sample(centroids_df, last_window)
                     sequence_samples.append(sample)
                 except Exception as e:
+                    failed_samples += 1
                     logging.warning(f"Failed to create remaining sample {i + 1}: {e}")
                     continue
         
         logging.info(f"Created {len(sequence_samples)} sequence samples")
+        if failed_samples > 0:
+            logging.warning(f"Failed to create {failed_samples} samples due to mutation threshold or other errors")
+        
+        expected_final_rows = len(sequence_samples) * epitopes_pos_num
+        logging.info(f"Expected final dataset rows: {len(sequence_samples)} × {epitopes_pos_num} = {expected_final_rows}")
+        
         return sequence_samples
     
     def _create_single_sample(self, centroids_df: pd.DataFrame, window: Dict) -> List[str]:
@@ -403,9 +639,48 @@ class DatasetCreationPipeline:
         return mutated_epitopes > self.max_similar_epitopes
     
     def _process_samples_to_dataset(self, sequence_samples: List[List[str]]) -> pd.DataFrame:
-        """Process sequence samples into final dataset format."""
+        """Process sequence samples into final dataset format using streaming."""
         logging.info("Processing sequence samples into dataset format...")
         
+        # Check if streaming is enabled
+        memory_config = self.config.get('memory_optimization', {})
+        use_streaming = memory_config.get('use_streaming', True)
+        
+        if use_streaming and len(sequence_samples) > self.batch_dataset_processor.batch_size:
+            logging.info(f"Using streaming dataset creation for {len(sequence_samples)} samples")
+            return self._process_samples_streaming(sequence_samples)
+        else:
+            logging.info(f"Using legacy dataset creation for {len(sequence_samples)} samples")
+            return self._process_samples_legacy(sequence_samples)
+    
+    def _process_samples_streaming(self, sequence_samples: List[List[str]]) -> pd.DataFrame:
+        """Process samples using streaming/batch approach."""
+        # Setup streaming output
+        temp_output = f"{self.final_dataset_file}.temp"
+        self.batch_dataset_processor.setup_output_file(temp_output)
+        
+        # Process in batches
+        self.batch_dataset_processor.process_in_batches(
+            sequence_samples,
+            description="dataset creation from sequence samples"
+        )
+        
+        # Read back the streaming result
+        if os.path.exists(temp_output):
+            logging.info("Reading streaming dataset result...")
+            dataset_df = pd.read_csv(temp_output)
+            
+            # Clean up temp file
+            os.remove(temp_output)
+            
+            logging.info(f"Streaming dataset creation completed: {len(dataset_df)} rows")
+            return dataset_df
+        else:
+            logging.warning("No streaming output generated, falling back to legacy method")
+            return self._process_samples_legacy(sequence_samples)
+    
+    def _process_samples_legacy(self, sequence_samples: List[List[str]]) -> pd.DataFrame:
+        """Legacy method for processing samples (fallback for small datasets)."""
         # Extract epitopes with context
         epitope_samples = self._extract_epitopes_with_context(sequence_samples)
         
@@ -474,26 +749,38 @@ class DatasetCreationPipeline:
         return triplets
     
     def _triplets_to_indices(self, triplets: List[str]) -> List[int]:
-        """Convert triplets to ProtVec indices."""
+        """Convert triplets to ProtVec indices using fast dictionary lookup."""
         indices = []
         for triplet in triplets:
-            matching_rows = self.prot_vec_df[self.prot_vec_df['words'] == triplet]
-            if not matching_rows.empty:
-                indices.append(matching_rows.index[0])
+            if triplet in self.triplet_to_index:
+                indices.append(self.triplet_to_index[triplet])
             else:
                 # Use a default index for unknown triplets
                 indices.append(0)
         return indices
     
     def _create_final_dataframe(self, protvec_samples: List[List[List[List[int]]]]) -> pd.DataFrame:
-        """Create final dataset DataFrame."""
+        """Create final dataset DataFrame using efficient batch creation."""
         logging.info("Creating final dataset DataFrame...")
+        logging.info(f"Number of ProtVec samples: {len(protvec_samples)}")
         
-        # Create column headers
-        columns = ['y'] + [str(i) for i in range(self.window_size)]
-        df = pd.DataFrame(columns=columns)
+        if not protvec_samples:
+            columns = ['y'] + [str(i) for i in range(self.window_size)]
+            return pd.DataFrame(columns=columns)
         
-        for sample in protvec_samples:
+        epitopes_count = len(protvec_samples[0][0]) if protvec_samples[0] else 0
+        total_expected_rows = len(protvec_samples) * epitopes_count
+        logging.info(f"Epitopes per sample: {epitopes_count}")
+        logging.info(f"Expected final rows: {len(protvec_samples)} samples × {epitopes_count} epitopes = {total_expected_rows}")
+        
+        # Pre-allocate list for all rows (much faster than df.loc)
+        logging.info("Starting row generation...")
+        all_rows = []
+        
+        for sample_idx, sample in enumerate(protvec_samples):
+            if sample_idx % 50 == 0:
+                logging.info(f"Processing sample {sample_idx + 1}/{len(protvec_samples)} for DataFrame creation")
+            
             epitopes_count = len(sample[0])  # Number of epitope positions
             
             for epitope_idx in range(epitopes_count):
@@ -508,11 +795,19 @@ class DatasetCreationPipeline:
                 
                 # Create row for dataset
                 dataset_row = self._create_dataset_row(row_data)
-                df.loc[len(df)] = dataset_row
+                all_rows.append(dataset_row)
+        
+        # Create DataFrame from all rows at once (much faster)
+        columns = ['y'] + [str(i) for i in range(self.window_size)]
+        logging.info(f"Creating DataFrame with {len(all_rows)} rows...")
+        df = pd.DataFrame(all_rows, columns=columns)
+        logging.info(f"DataFrame created successfully with {len(df)} rows")
         
         # Shuffle the dataset
+        logging.info("Shuffling dataset...")
         df = shuffle(df, random_state=42)
         df.reset_index(drop=True, inplace=True)
+        logging.info("Dataset shuffling completed")
         
         return df
     
@@ -530,8 +825,11 @@ class DatasetCreationPipeline:
         else:
             mutation_label = 0
         
+        # Convert lists to strings for DataFrame compatibility
+        input_sequences_str = [str(seq) for seq in input_sequences]
+        
         # Create final row
-        result_row = [mutation_label] + input_sequences
+        result_row = [mutation_label] + input_sequences_str
         return result_row
     
     def _sequences_similar(self, seq1: List[int], seq2: List[int]) -> bool:
@@ -542,20 +840,109 @@ class DatasetCreationPipeline:
         matching_elements = len(set(seq1) & set(seq2))
         return matching_elements >= 3
     
-    def _remove_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Remove duplicate rows from dataset."""
+    def _remove_duplicates(self, df: pd.DataFrame) -> tuple[pd.DataFrame, float]:
+        """Remove duplicate rows from dataset and return duplicate rate."""
+        logging.info(f"Starting duplicate removal on {len(df)} rows...")
+        
+        # Check if streaming duplicate removal should be used
+        memory_config = self.config.get('memory_optimization', {})
+        use_streaming = memory_config.get('use_streaming', True)
+        batch_size = memory_config.get('dataset_creation_batch_size', 100)
+        
+        if use_streaming and len(df) > batch_size * 10:
+            logging.info("Using streaming duplicate removal for large dataset")
+            return self._remove_duplicates_streaming(df)
+        else:
+            logging.info("Using standard duplicate removal")
+            return self._remove_duplicates_standard(df)
+    
+    def _remove_duplicates_streaming(self, df: pd.DataFrame) -> tuple[pd.DataFrame, float]:
+        """Remove duplicates using streaming approach for large datasets."""
         # Define columns to check for duplicates (all input columns, not y)
         duplicate_columns = [str(i) for i in range(self.window_size)]
         
         original_count = len(df)
+        
+        # Use a temporary file for streaming deduplication
+        temp_file = f"{self.final_dataset_file}.dedup_temp"
+        seen_signatures = set()
+        rows_written = 0
+        
+        try:
+            # Process in chunks
+            memory_config = self.config.get('memory_optimization', {})
+            chunk_size = memory_config.get('dataset_creation_batch_size', 100)
+            
+            with open(temp_file, 'w') as outfile:
+                # Write header
+                header_written = False
+                
+                for start_idx in range(0, len(df), chunk_size):
+                    end_idx = min(start_idx + chunk_size, len(df))
+                    chunk = df.iloc[start_idx:end_idx]
+                    
+                    # Filter duplicates in chunk
+                    unique_chunk_rows = []
+                    
+                    for _, row in chunk.iterrows():
+                        # Create signature from duplicate columns
+                        signature = tuple(row[duplicate_columns].values)
+                        
+                        if signature not in seen_signatures:
+                            seen_signatures.add(signature)
+                            unique_chunk_rows.append(row)
+                    
+                    # Write unique rows from this chunk
+                    if unique_chunk_rows:
+                        chunk_unique = pd.DataFrame(unique_chunk_rows)
+                        chunk_unique.to_csv(outfile, mode='a', header=not header_written, index=False)
+                        header_written = True
+                        rows_written += len(chunk_unique)
+                    
+                    # Memory cleanup
+                    if start_idx % (chunk_size * 10) == 0:
+                        logging.info(f"Processed {end_idx}/{len(df)} rows for deduplication")
+            
+            # Read back the deduplicated data
+            df_clean = pd.read_csv(temp_file)
+            
+            # Clean up temp file
+            os.remove(temp_file)
+            
+            removed_count = original_count - len(df_clean)
+            duplicate_rate = removed_count / original_count if original_count > 0 else 0
+            
+            logging.info(f"Streaming duplicate removal completed: {removed_count} duplicates removed ({duplicate_rate:.1%} duplication rate)")
+            logging.info(f"Final dataset size after deduplication: {len(df_clean)} rows")
+            
+            return df_clean, duplicate_rate
+            
+        except Exception as e:
+            # Clean up temp file in case of error
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+            logging.error(f"Streaming duplicate removal failed: {e}")
+            # Fallback to standard method
+            return self._remove_duplicates_standard(df)
+    
+    def _remove_duplicates_standard(self, df: pd.DataFrame) -> tuple[pd.DataFrame, float]:
+        """Standard duplicate removal method."""
+        # Define columns to check for duplicates (all input columns, not y)
+        duplicate_columns = [str(i) for i in range(self.window_size)]
+        
+        original_count = len(df)
+        logging.info("Identifying duplicates...")
         df_clean = df.drop_duplicates(subset=duplicate_columns)
+        logging.info("Resetting index...")
         df_clean.reset_index(drop=True, inplace=True)
         
         removed_count = original_count - len(df_clean)
-        if removed_count > 0:
-            logging.info(f"Removed {removed_count} duplicate rows")
+        duplicate_rate = removed_count / original_count if original_count > 0 else 0
         
-        return df_clean
+        logging.info(f"Duplicate removal completed: {removed_count} duplicates removed ({duplicate_rate:.1%} duplication rate)")
+        logging.info(f"Final dataset size after deduplication: {len(df_clean)} rows")
+        
+        return df_clean, duplicate_rate
     
     def _save_dataset(self, df: pd.DataFrame) -> None:
         """Save dataset to CSV file."""

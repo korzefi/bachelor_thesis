@@ -2,6 +2,23 @@
 project_name: "SARS-CoV-2-Spike-Mutation"
 protein_name: "SARS-CoV-2 Spike"
 
+# --- MEMORY OPTIMIZATION ---
+memory_optimization:
+  # Batch sizes for different operations
+  data_preparation_batch_size: 1000
+  clustering_batch_size: 500
+  dataset_creation_batch_size: 100
+  protvec_batch_size: 50
+  
+  # Memory limits
+  max_memory_mb: 4096
+  gc_frequency: 100  # Garbage collection every N batches
+  
+  # I/O optimization
+  use_streaming: true
+  intermediate_saves: true
+  compression: false
+
 # --- PATHS ---
 data:
   raw_fasta_file: "data/input/spikeprot0723.fasta"
@@ -52,7 +69,7 @@ cluster:
   use_multiprocessing: true
   processes: null # null for all available cores
   
-  # NEW: Automatic k-selection using Silhouette Score
+  # Automatic k-selection using Silhouette Score
   auto_k_selection:
     enabled: true
     min_k: 2
@@ -101,10 +118,12 @@ create_dataset:
   epitopes_similarity_threshold: 0.5
   # Total desired samples in the final dataset.
   dataset_size: 12680 # 317 positions * 40 samples
+  # Duplication factor to compensate for high duplicate removal rates
+  duplication_factor: 5
   # For refilling dataset to meet ratio
   refiller:
     enabled: true
-    max_iterations: 20
+    max_iterations: 200
     target_mutated_ratio: 0.2
 
 # 5. Train Model (from training.py, models.py)

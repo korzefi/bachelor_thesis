@@ -18,10 +18,110 @@ import pandas as pd
 from pathlib import Path
 from natsort import natsorted
 from typing import Dict, List, Tuple
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, MiniBatchKMeans
 from sklearn.metrics import silhouette_score
+import numpy as np
 
 import scripts.utils as utils
+from scripts.utils import BatchProcessor, DataFrameChunker
+
+
+class BatchVectorProcessor(BatchProcessor):
+    """Batch processor for converting sequences to vectors."""
+    
+    def __init__(self, config: Dict, prot_vec_df: pd.DataFrame):
+        memory_config = config.get('memory_optimization', {})
+        batch_size = memory_config.get('clustering_batch_size', 500)
+        super().__init__(config, batch_size, "BatchVectorProcessor")
+        
+        self.prot_vec_df = prot_vec_df
+        self.temp_dir = None
+        self.current_file = None
+        
+        # Create lookup dictionary for faster triplet-to-vector mapping
+        self.triplet_to_vector = {}
+        for idx, row in prot_vec_df.iterrows():
+            vector = row.drop('words').values.astype('float64')
+            self.triplet_to_vector[row['words']] = vector
+        
+        logging.info(f"Created vector lookup dictionary with {len(self.triplet_to_vector)} triplets")
+    
+    def setup_output_file(self, output_path: str):
+        """Setup output file for batch results."""
+        self.current_file = output_path
+        self.temp_dir = f"{output_path}_temp"
+        utils.create_dir(self.temp_dir)
+    
+    def process_batch(self, batch_sequences: List[str]) -> pd.DataFrame:
+        """Process a batch of sequences to vectors."""
+        # Convert sequences to triplets
+        triplets_list = self._create_triplets_from_sequences(batch_sequences)
+        
+        # Transform triplets to vectors
+        vectors_df = self._transform_triplets_to_vectors_batch(triplets_list)
+        
+        return vectors_df
+    
+    def save_batch_result(self, vectors_df: pd.DataFrame, batch_index: int) -> None:
+        """Save batch result to temporary file."""
+        temp_file = f"{self.temp_dir}/batch_{batch_index:04d}.csv"
+        vectors_df.to_csv(temp_file, index=False)
+    
+    def finalize_output(self) -> None:
+        """Merge all batch files into final output."""
+        if not self.current_file or not self.temp_dir:
+            return
+        
+        # Get all batch files
+        batch_files = [f"{self.temp_dir}/{f}" for f in os.listdir(self.temp_dir) if f.endswith('.csv')]
+        batch_files.sort()  # Ensure correct order
+        
+        if batch_files:
+            DataFrameChunker.merge_csv_files(batch_files, self.current_file, remove_input=True)
+            os.rmdir(self.temp_dir)
+            logging.info(f"Merged {len(batch_files)} batch files into {self.current_file}")
+    
+    def _create_triplets_from_sequences(self, sequences: List[str]) -> List[List[str]]:
+        """Convert sequences to 3-grams (triplets) of amino acids."""
+        triplets_list = []
+        
+        for sequence in sequences:
+            # Remove stop codon if present
+            if sequence.endswith('*'):
+                sequence = sequence[:-1]
+            
+            # Create triplets
+            seq_len = len(sequence)
+            if seq_len >= 3:
+                triplets = [sequence[i:i+3] for i in range(seq_len - 2)]
+                triplets_list.append(triplets)
+            else:
+                # Handle very short sequences
+                triplets_list.append([sequence])
+        
+        return triplets_list
+    
+    def _transform_triplets_to_vectors_batch(self, triplets_list: List[List[str]]) -> pd.DataFrame:
+        """Transform triplets to vectors using fast lookup."""
+        # Pre-allocate result array for better performance
+        batch_size = len(triplets_list)
+        vector_dim = 100
+        result_vectors = np.zeros((batch_size, vector_dim), dtype='float64')
+        
+        for seq_idx, triplets in enumerate(triplets_list):
+            # Initialize sequence vector
+            seq_vector = np.zeros(vector_dim, dtype='float64')
+            
+            # Sum vectors for all triplets in the sequence
+            for triplet in triplets:
+                if triplet in self.triplet_to_vector:
+                    seq_vector += self.triplet_to_vector[triplet]
+            
+            result_vectors[seq_idx] = seq_vector
+        
+        # Create DataFrame
+        vector_columns = [f'd{i}' for i in range(1, vector_dim + 1)]
+        return pd.DataFrame(result_vectors, columns=vector_columns)
 
 
 class ClusteringPipeline:
@@ -44,6 +144,9 @@ class ClusteringPipeline:
         
         # Load ProtVec embeddings
         self.prot_vec_df = self._load_prot_vec_embeddings()
+        
+        # Initialize batch processor for vector transformation
+        self.batch_processor = BatchVectorProcessor(config, self.prot_vec_df)
     
     def _create_directories(self) -> None:
         """Create necessary directory structure."""
@@ -63,7 +166,8 @@ class ClusteringPipeline:
             # Step 1: Get period files to process
             period_files = self._get_period_files()
             logging.info(f"Found {len(period_files)} period files to process")
-            
+
+            # TODO: if data is already embedded, don't transform it
             # Step 2: Transform sequences to vectors
             if self.cluster_config['use_multiprocessing']:
                 self._transform_sequences_to_vectors_parallel(period_files)
@@ -134,9 +238,43 @@ class ClusteringPipeline:
             pool.map(self._transform_single_file, period_files)
     
     def _transform_single_file(self, period_file: str) -> None:
-        """Transform sequences in a single file to vectors."""
+        """Transform sequences in a single file to vectors using batch processing."""
         logging.info(f"Transforming sequences for file: {period_file}")
         
+        input_path = f"{self.periods_unique_dir}/{period_file}"
+        output_path = f"{self.vector_temp_dir}/{period_file}"
+        
+        # Check if streaming is enabled
+        memory_config = self.config.get('memory_optimization', {})
+        use_streaming = memory_config.get('use_streaming', True)
+        
+        if use_streaming:
+            # Use batch processing for memory efficiency
+            self.batch_processor.setup_output_file(output_path)
+            
+            # Process sequences in batches
+            total_sequences = sum(1 for _ in open(input_path)) - 1  # Subtract header
+            logging.info(f"Processing {total_sequences} sequences in batches")
+            
+            # Read and process in chunks
+            self.batch_processor.process_in_batches(
+                input_path, 
+                description=f"vector transformation for {period_file}"
+            )
+            
+            # Merge batch results
+            self.batch_processor.finalize_output()
+        else:
+            # Fallback to original method for smaller files
+            self._transform_single_file_legacy(period_file)
+        
+        # Log completion
+        if os.path.exists(output_path):
+            df_result = pd.read_csv(output_path)
+            logging.info(f"Completed transformation for {period_file}: {len(df_result)} vectors")
+    
+    def _transform_single_file_legacy(self, period_file: str) -> None:
+        """Legacy method for transforming sequences (for small files or fallback)."""
         input_path = f"{self.periods_unique_dir}/{period_file}"
         output_path = f"{self.vector_temp_dir}/{period_file}"
         
@@ -152,8 +290,6 @@ class ClusteringPipeline:
         
         # Save vectors
         vectors_df.to_csv(output_path, index=False)
-        
-        logging.info(f"Completed transformation for {period_file}: {len(vectors_df)} vectors")
     
     def _create_triplets_from_sequences(self, sequences: List[str]) -> List[List[str]]:
         """Convert sequences to 3-grams (triplets) of amino acids."""
@@ -179,13 +315,13 @@ class ClusteringPipeline:
         """Transform triplets to vectors using ProtVec embeddings."""
         # Create template for results (100-dimensional vectors)
         vector_columns = [f'd{i}' for i in range(1, 101)]
-        result_df = pd.DataFrame(columns=vector_columns)
+        result_df = pd.DataFrame(columns=vector_columns, dtype='float64')
         
         for i, triplets in enumerate(triplets_list):
             logging.debug(f"Processing sequence {i+1}/{len(triplets_list)}")
             
             # Initialize sequence vector with zeros
-            seq_vector = pd.Series([0.0] * 100, index=vector_columns)
+            seq_vector = pd.Series([0.0] * 100, index=vector_columns, dtype='float64')
             
             # Sum up vectors for all triplets in the sequence
             for triplet in triplets:
@@ -195,10 +331,10 @@ class ClusteringPipeline:
                 if not triplet_row.empty:
                     # Add the embedding vector to the sequence vector
                     triplet_vector = triplet_row.iloc[0, 1:101]  # Skip 'words' column
-                    seq_vector += triplet_vector.values
+                    seq_vector = seq_vector.add(triplet_vector.values, fill_value=0.0)
             
-            # Round to 8 decimal places
-            seq_vector = seq_vector.round(8)
+            # Round to 8 decimal places and ensure float64 dtype
+            seq_vector = seq_vector.astype('float64').round(8)
             
             # Add to results
             result_df.loc[len(result_df)] = seq_vector
@@ -266,7 +402,7 @@ class ClusteringPipeline:
                 vector_file_path = f"{self.vector_temp_dir}/{period_file}"
                 
                 # Load vectors
-                vectors_df = pd.read_csv(vector_file_path)
+                vectors_df = pd.read_csv(vector_file_path, dtype='float64')
                 
                 if vectors_df.empty:
                     logging.warning(f"Empty vector file: {period_file}")
@@ -301,7 +437,7 @@ class ClusteringPipeline:
                     continue
                 
                 # Load vectors
-                vectors_df = pd.read_csv(vector_file_path)
+                vectors_df = pd.read_csv(vector_file_path, dtype='float64')
                 
                 if vectors_df.empty:
                     logging.warning(f"Empty vector file: {period_file}")
@@ -319,23 +455,57 @@ class ClusteringPipeline:
         logging.info("Cluster creation completed for all periods")
     
     def _create_kmeans_clusters(self, vectors_df: pd.DataFrame, n_clusters: int) -> Dict:
-        """Create K-means clusters from vector data."""
-        # Use K-means with good default parameters
-        kmeans = KMeans(
-            n_clusters=n_clusters,
-            n_init=10,  # Number of random initializations
-            max_iter=300,
-            random_state=42  # For reproducibility
-        )
-        
-        # Fit the model
+        """Create K-means clusters from vector data with memory optimization."""
         vectors_array = vectors_df.to_numpy()
+        n_samples = len(vectors_array)
+        
+        # Get memory optimization settings
+        memory_config = self.config.get('memory_optimization', {})
+        clustering_batch_size = memory_config.get('clustering_batch_size', 500)
+        
+        # Choose clustering algorithm based on data size
+        use_minibatch = n_samples > clustering_batch_size * 2
+        
+        if use_minibatch:
+            logging.info(f"Using Mini-Batch K-means for {n_samples} samples (memory optimization)")
+            
+            # Use Mini-Batch K-means for large datasets
+            kmeans = MiniBatchKMeans(
+                n_clusters=n_clusters,
+                batch_size=min(clustering_batch_size, n_samples // 4),
+                n_init=3,  # Fewer initializations for Mini-Batch
+                max_iter=100,
+                random_state=42,
+                max_no_improvement=10
+            )
+        else:
+            logging.info(f"Using standard K-means for {n_samples} samples")
+            
+            # Use standard K-means for smaller datasets
+            kmeans = KMeans(
+                n_clusters=n_clusters,
+                n_init=10,  # Number of random initializations
+                max_iter=300,
+                random_state=42  # For reproducibility
+            )
+        
+        # Fit the model with memory monitoring
+        initial_memory = self.batch_processor.memory_monitor.get_memory_usage_mb()
+        logging.info(f"Starting clustering with {initial_memory:.1f}MB memory usage")
+        
         kmeans.fit(vectors_array)
+        
+        final_memory = self.batch_processor.memory_monitor.get_memory_usage_mb()
+        logging.info(f"Clustering completed, memory usage: {final_memory:.1f}MB")
+        
+        # Force garbage collection after clustering
+        self.batch_processor.memory_monitor.force_garbage_collection()
         
         return {
             'labels': kmeans.labels_,
             'centroids': kmeans.cluster_centers_,
-            'inertia': kmeans.inertia_
+            'inertia': kmeans.inertia_,
+            'algorithm': 'mini-batch' if use_minibatch else 'standard'
         }
     
     def _save_cluster_labels(self, period_file: str, labels: List[int]) -> None:

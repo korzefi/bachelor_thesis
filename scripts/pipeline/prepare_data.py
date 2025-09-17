@@ -23,6 +23,7 @@ from natsort import natsorted
 from typing import Dict, List
 
 import scripts.utils as utils
+from scripts.utils import BatchProcessor, DataFrameChunker
 
 
 class DataPreparationPipeline:
@@ -36,6 +37,14 @@ class DataPreparationPipeline:
         
         # Create directory structure
         self._create_directories()
+        
+        # Initialize memory monitoring
+        memory_config = config.get('memory_optimization', {})
+        self.batch_size = memory_config.get('data_preparation_batch_size', 1000)
+        self.memory_monitor = utils.MemoryMonitor(
+            memory_config.get('max_memory_mb'),
+            memory_config.get('gc_frequency', 100)
+        )
     
     def _create_directories(self) -> None:
         """Create necessary directory structure."""
@@ -178,7 +187,7 @@ class DataPreparationPipeline:
         logging.info("FASTA to CSV conversion completed.")
     
     def _clean_csv_data(self) -> None:
-        """Clean CSV data by removing invalid sequences."""
+        """Clean CSV data by removing invalid sequences using memory-optimized processing."""
         logging.info("Cleaning CSV data...")
         
         temp_csv_dir = self.data_config['temp_csv_dir']
@@ -202,22 +211,86 @@ class DataPreparationPipeline:
             expected_len, min_len, max_len = self._auto_detect_sequence_length(csv_files, temp_csv_dir, clean_config)
             logging.info(f"Auto-detected expected length: {expected_len} (range: {min_len}-{max_len})")
         
+        # Check if streaming should be used
+        memory_config = self.config.get('memory_optimization', {})
+        use_streaming = memory_config.get('use_streaming', True)
+        
         for i, csv_file in enumerate(csv_files, 1):
             logging.info(f"Cleaning file {i}/{len(csv_files)}: {csv_file}")
             
             csv_path = f"{temp_csv_dir}/{csv_file}"
-            df = pd.read_csv(csv_path)
             
-            # Apply cleaning steps
-            df = self._remove_ambiguous_amino_acids(df)
-            df = self._filter_by_length(df, min_len, max_len)
-            df = self._parse_and_filter_description(df)
-            df = self._remove_duplicates(df)
+            # Check file size to determine processing method
+            file_size_mb = os.path.getsize(csv_path) / 1024 / 1024
             
-            # Save cleaned data
-            df.to_csv(csv_path, index=False)
+            if use_streaming and file_size_mb > 10:  # Use streaming for files > 10MB
+                self._clean_csv_file_streaming(csv_path, min_len, max_len)
+            else:
+                self._clean_csv_file_standard(csv_path, min_len, max_len)
+            
+            # Memory monitoring
+            self.memory_monitor.batch_completed()
         
         logging.info("CSV data cleaning completed.")
+    
+    def _clean_csv_file_streaming(self, csv_path: str, min_len: int, max_len: int) -> None:
+        """Clean a single CSV file using streaming/chunked processing."""
+        logging.info(f"Using streaming processing for large file: {os.path.basename(csv_path)}")
+        
+        temp_output = f"{csv_path}.temp"
+        total_rows = 0
+        cleaned_rows = 0
+        
+        try:
+            # Process in chunks
+            with open(temp_output, 'w') as outfile:
+                header_written = False
+                
+                for chunk in DataFrameChunker.read_csv_in_chunks(csv_path, self.batch_size):
+                    total_rows += len(chunk)
+                    
+                    # Apply cleaning steps
+                    chunk = self._remove_ambiguous_amino_acids(chunk)
+                    chunk = self._filter_by_length(chunk, min_len, max_len)
+                    chunk = self._parse_and_filter_description(chunk)
+                    chunk = self._remove_duplicates(chunk)
+                    
+                    # Write cleaned chunk
+                    if not chunk.empty:
+                        DataFrameChunker.write_csv_incrementally(
+                            chunk, temp_output, 
+                            header=not header_written, mode='a'
+                        )
+                        header_written = True
+                        cleaned_rows += len(chunk)
+            
+            # Replace original file with cleaned version
+            shutil.move(temp_output, csv_path)
+            
+            logging.info(f"Streaming clean completed: {cleaned_rows}/{total_rows} sequences remaining")
+            
+        except Exception as e:
+            # Clean up temp file on error
+            if os.path.exists(temp_output):
+                os.remove(temp_output)
+            logging.error(f"Streaming processing failed for {csv_path}: {e}")
+            # Fallback to standard processing
+            self._clean_csv_file_standard(csv_path, min_len, max_len)
+    
+    def _clean_csv_file_standard(self, csv_path: str, min_len: int, max_len: int) -> None:
+        """Clean a single CSV file using standard processing."""
+        df = pd.read_csv(csv_path)
+        
+        # Apply cleaning steps
+        df = self._remove_ambiguous_amino_acids(df)
+        df = self._filter_by_length(df, min_len, max_len)
+        df = self._parse_and_filter_description(df)
+        df = self._remove_duplicates(df)
+        
+        # Save cleaned data
+        df.to_csv(csv_path, index=False)
+        
+        logging.info(f"Standard clean completed: {len(df)} sequences remaining")
     
     def _sort_into_periods(self) -> None:
         """Sort sequences into time periods."""
