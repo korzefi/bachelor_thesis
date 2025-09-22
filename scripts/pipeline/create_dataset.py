@@ -21,6 +21,11 @@ from pathlib import Path
 from natsort import natsorted
 from sklearn.utils import shuffle
 from typing import Dict, List, Tuple, Any
+import multiprocessing
+import pickle
+import itertools
+import time
+from joblib import Parallel, delayed
 
 import scripts.utils as utils
 from scripts.utils import BatchProcessor, DataFrameChunker
@@ -217,6 +222,428 @@ class SequencesMutatedTooMuch(DatasetCreationError):
         super().__init__(self.message)
 
 
+class CheckpointManager:
+    """Manages checkpointing for resumable dataset creation."""
+
+    def __init__(self, checkpoint_file: str):
+        self.checkpoint_file = checkpoint_file
+        self.data = self._load_checkpoint()
+
+        # Ensure output directory exists
+        Path(checkpoint_file).parent.mkdir(parents=True, exist_ok=True)
+
+    def _load_checkpoint(self) -> Dict:
+        """Load existing checkpoint data or create new one."""
+        if Path(self.checkpoint_file).exists():
+            try:
+                with open(self.checkpoint_file, 'rb') as f:
+                    data = pickle.load(f)
+                logging.info(f"Loaded checkpoint from {self.checkpoint_file}")
+                return data
+            except Exception as e:
+                logging.warning(f"Failed to load checkpoint: {e}. Starting fresh.")
+
+        return {
+            'completed_windows': {},
+            'last_completed_window': -1,
+            'total_samples_created': 0,
+            'start_time': time.time()
+        }
+
+    def save_window_results(self, window_idx: int, samples: List) -> None:
+        """Save completed window results."""
+        self.data['completed_windows'][window_idx] = {
+            'samples': samples,
+            'timestamp': time.time(),
+            'sample_count': len(samples)
+        }
+        self.data['last_completed_window'] = max(
+            self.data['last_completed_window'],
+            window_idx
+        )
+        self.data['total_samples_created'] += len(samples)
+
+        # Save to disk
+        self._save_checkpoint()
+
+        logging.info(f"Checkpoint saved: Window {window_idx} completed with {len(samples)} samples")
+
+    def save_batch_results(self, window_results: List[Tuple[int, List]]) -> None:
+        """Save a batch of window results."""
+        for window_idx, samples in window_results:
+            self.save_window_results(window_idx, samples)
+
+    def get_resume_point(self) -> int:
+        """Get the window index to resume from."""
+        return self.data['last_completed_window'] + 1
+
+    def get_completed_samples(self) -> List:
+        """Get all completed samples for final processing."""
+        all_samples = []
+        for window_idx in sorted(self.data['completed_windows'].keys()):
+            window_data = self.data['completed_windows'][window_idx]
+            all_samples.extend(window_data['samples'])
+        return all_samples
+
+    def _save_checkpoint(self) -> None:
+        """Save checkpoint data to disk."""
+        try:
+            with open(self.checkpoint_file, 'wb') as f:
+                pickle.dump(self.data, f)
+        except Exception as e:
+            logging.error(f"Failed to save checkpoint: {e}")
+
+    def clear_checkpoint(self) -> None:
+        """Clear checkpoint file after successful completion."""
+        try:
+            if Path(self.checkpoint_file).exists():
+                os.remove(self.checkpoint_file)
+                logging.info("Checkpoint file cleared after successful completion")
+        except Exception as e:
+            logging.warning(f"Failed to clear checkpoint file: {e}")
+
+    def get_progress_info(self) -> Dict:
+        """Get progress information for logging."""
+        elapsed_time = time.time() - self.data['start_time']
+        return {
+            'completed_windows': len(self.data['completed_windows']),
+            'total_samples': self.data['total_samples_created'],
+            'elapsed_time': elapsed_time,
+            'last_window': self.data['last_completed_window']
+        }
+
+
+class SequenceCache:
+    """Pre-loads and caches all sequences for fast retrieval."""
+
+    def __init__(self, periods_dir: str):
+        self.periods_dir = periods_dir
+        self.cache = {}  # (period, cluster) -> [sequences]
+        self.period_files = {}  # period -> DataFrame
+        self._preload_all_sequences()
+
+    def _preload_all_sequences(self) -> None:
+        """Pre-load all period files and build cluster→sequences cache."""
+        start_time = time.time()
+
+        period_files = [f for f in os.listdir(self.periods_dir) if f.endswith('.csv')]
+        logging.info(f"Pre-loading sequences from {len(period_files)} period files...")
+
+        total_sequences = 0
+        total_clusters = 0
+
+        for period_file in period_files:
+            period_name = period_file.replace('.csv', '')
+            file_path = os.path.join(self.periods_dir, period_file)
+
+            try:
+                df = pd.read_csv(file_path)
+
+                # Store the DataFrame for quick access
+                self.period_files[period_name] = df
+
+                # Group sequences by cluster
+                for cluster_id in df['cluster'].unique():
+                    # Skip invalid clusters (e.g., -1 for filtered sequences)
+                    if cluster_id < 0:
+                        continue
+
+                    cluster_sequences = df[df['cluster'] == cluster_id]['sequence'].tolist()
+                    # Filter out NaN sequences
+                    cluster_sequences = [seq for seq in cluster_sequences if pd.notna(seq)]
+
+                    if cluster_sequences:
+                        self.cache[(period_name, cluster_id)] = cluster_sequences
+                        total_sequences += len(cluster_sequences)
+                        total_clusters += 1
+
+            except Exception as e:
+                logging.warning(f"Failed to load period file {period_file}: {e}")
+
+        elapsed_time = time.time() - start_time
+        logging.info(f"Sequence cache loaded in {elapsed_time:.1f}s: "
+                    f"{total_sequences:,} sequences across {total_clusters:,} clusters")
+
+    def get_sequences_for_cluster(self, period: str, cluster: int) -> List[str]:
+        """Get cached sequences for a cluster."""
+        return self.cache.get((period, cluster), [])
+
+    def get_random_sequence_from_cluster(self, period: str, cluster: int) -> str:
+        """Get a random sequence from a specific cluster."""
+        sequences = self.get_sequences_for_cluster(period, cluster)
+
+        if not sequences:
+            raise DatasetCreationError(f"No sequences found for cluster {cluster} in period {period}")
+
+        return random.choice(sequences)
+
+    def get_cluster_count(self, period: str) -> int:
+        """Get the number of clusters in a period."""
+        if period in self.period_files:
+            return len(self.period_files[period]['cluster'].unique())
+        return 0
+
+    def get_cache_stats(self) -> Dict:
+        """Get cache statistics for monitoring."""
+        total_sequences = sum(len(seqs) for seqs in self.cache.values())
+        total_clusters = len(self.cache)
+        periods_count = len(set(period for period, _ in self.cache.keys()))
+
+        return {
+            'total_sequences': total_sequences,
+            'total_clusters': total_clusters,
+            'periods_count': periods_count,
+            'avg_sequences_per_cluster': total_sequences / total_clusters if total_clusters > 0 else 0
+        }
+
+
+def _process_window_worker(args):
+    """Worker function for parallel window processing."""
+    (window_idx, window, samples_per_window, centroids_df_dict,
+     sequence_cache_data, pipeline_config) = args
+
+    # Reconstruct objects from serializable data
+    centroids_df = pd.DataFrame(centroids_df_dict)
+
+    # Worker-specific logging
+    worker_start = time.time()
+    logging.info(f"Worker starting window {window_idx}: {window}")
+
+    # Create samples in parallel within this window using joblib
+    sample_workers = pipeline_config.get('sample_workers', 2)
+    try:
+        samples = Parallel(n_jobs=sample_workers, backend='threading')(
+            delayed(_create_single_sample_cached)(
+                centroids_df, window, sequence_cache_data, pipeline_config
+            ) for _ in range(samples_per_window)
+        )
+
+        # Filter out failed samples (None values)
+        successful_samples = [s for s in samples if s is not None]
+
+        worker_time = time.time() - worker_start
+        logging.info(f"Worker completed window {window_idx}: {len(successful_samples)}/{samples_per_window} samples in {worker_time:.1f}s")
+
+        return window_idx, successful_samples
+
+    except Exception as e:
+        logging.error(f"Worker failed for window {window_idx}: {e}")
+        return window_idx, []
+
+
+def _create_single_sample_cached(centroids_df, window, sequence_cache_data, pipeline_config):
+    """Create a single sequence sample using cached sequences."""
+    max_retries = 10
+
+    for retry in range(max_retries):
+        try:
+            # Choose first sequence randomly
+            first_sequence_info = _choose_first_sequence_cached(
+                centroids_df, window, sequence_cache_data
+            )
+
+            # Link remaining sequences
+            sample_sequences = _link_remaining_sequences_cached(
+                centroids_df, first_sequence_info, window,
+                sequence_cache_data, pipeline_config
+            )
+
+            return sample_sequences
+
+        except SequencesMutatedTooMuch:
+            if retry == max_retries - 1:
+                logging.warning(f"Sample creation failed after {max_retries} retries (mutation threshold)")
+                return None
+            continue
+        except Exception as e:
+            logging.warning(f"Sample creation failed (retry {retry + 1}): {e}")
+            if retry == max_retries - 1:
+                return None
+            continue
+
+    return None
+
+
+def _choose_first_sequence_cached(centroids_df, window, sequence_cache_data):
+    """Choose the first sequence using cached data."""
+    first_period = window['x'][0]
+    first_period_rows = centroids_df[centroids_df['period'] == first_period]
+
+    if first_period_rows.empty:
+        raise DatasetCreationError(f"No clusters found for period: {first_period}")
+
+    # Sample random cluster
+    chosen_row = first_period_rows.sample(n=1).iloc[0]
+    current_cluster = chosen_row['cluster']
+    next_clusters_str = chosen_row['next_cluster']
+
+    # Parse next clusters
+    if pd.isna(next_clusters_str) or next_clusters_str == '':
+        next_clusters = []
+    else:
+        next_clusters = [int(x) for x in str(next_clusters_str).split('-') if x.strip()]
+
+    # Get sequence from cache
+    cache_key = (first_period, current_cluster)
+    if cache_key in sequence_cache_data:
+        sequences = sequence_cache_data[cache_key]
+        if sequences:
+            sequence = random.choice(sequences)
+        else:
+            raise DatasetCreationError(f"No sequences in cache for cluster {current_cluster} in period {first_period}")
+    else:
+        raise DatasetCreationError(f"Cache key {cache_key} not found")
+
+    return {
+        'sequence': sequence,
+        'next_clusters': next_clusters
+    }
+
+
+def _link_remaining_sequences_cached(centroids_df, first_sequence_info, window,
+                                   sequence_cache_data, pipeline_config):
+    """Link remaining sequences using cached data."""
+    sequences = [first_sequence_info['sequence']]
+    current_next_clusters = first_sequence_info['next_clusters']
+
+    # Get pipeline configuration
+    epitopes_positions = pipeline_config.get('epitopes_positions', [])
+    epitopes_similarity_threshold = pipeline_config.get('epitopes_similarity_threshold', 0.5)
+    max_similar_epitopes = int(len(epitopes_positions) * epitopes_similarity_threshold)
+
+    # Process x periods (input sequence)
+    for i in range(1, len(window['x'])):
+        current_period = window['x'][i]
+
+        if not current_next_clusters:
+            raise DatasetCreationError(f"No next clusters available for period: {current_period}")
+
+        # Choose random cluster from available next clusters
+        current_cluster = random.choice(current_next_clusters)
+
+        # Get cluster info for current period
+        cluster_row = centroids_df[
+            (centroids_df['period'] == current_period) &
+            (centroids_df['cluster'] == current_cluster)
+        ]
+
+        if cluster_row.empty:
+            raise DatasetCreationError(f"Cluster {current_cluster} not found in period {current_period}")
+
+        # Get sequence from cache and check mutation threshold
+        cache_key = (current_period, current_cluster)
+        if cache_key not in sequence_cache_data:
+            raise DatasetCreationError(f"Cache key {cache_key} not found")
+
+        cached_sequences = sequence_cache_data[cache_key]
+        if not cached_sequences:
+            raise DatasetCreationError(f"No sequences in cache for cluster {current_cluster} in period {current_period}")
+
+        previous_sequence = sequences[-1]
+
+        # Retry if mutated too much
+        max_mutation_retries = 10
+        retry_count = 0
+        sequence = None
+
+        while retry_count < max_mutation_retries:
+            sequence = random.choice(cached_sequences)
+            if not _is_mutated_too_much_cached(previous_sequence, sequence, epitopes_positions, max_similar_epitopes):
+                break
+            retry_count += 1
+
+        if retry_count >= max_mutation_retries:
+            raise SequencesMutatedTooMuch()
+
+        sequences.append(sequence)
+
+        # Update next clusters for next iteration
+        next_clusters_str = cluster_row.iloc[0]['next_cluster']
+        if pd.isna(next_clusters_str) or next_clusters_str == '':
+            current_next_clusters = []
+        else:
+            current_next_clusters = [int(x) for x in str(next_clusters_str).split('-') if x.strip()]
+
+    # Add y period sequence (target)
+    y_period = window['y']
+    if current_next_clusters:
+        target_cluster = random.choice(current_next_clusters)
+        cache_key = (y_period, target_cluster)
+        if cache_key in sequence_cache_data and sequence_cache_data[cache_key]:
+            target_sequence = random.choice(sequence_cache_data[cache_key])
+            sequences.append(target_sequence)
+        else:
+            raise DatasetCreationError(f"No sequences in cache for cluster {target_cluster} in period {y_period}")
+    else:
+        raise DatasetCreationError(f"No clusters available for target period: {y_period}")
+
+    return sequences
+
+
+def _is_mutated_too_much_cached(prev_sequence, current_sequence, epitopes_positions, max_similar_epitopes):
+    """Check if sequences are mutated beyond threshold in epitope regions."""
+    mutated_epitopes = 0
+
+    for pos in epitopes_positions:
+        if pos < len(prev_sequence) and pos < len(current_sequence):
+            if prev_sequence[pos] != current_sequence[pos]:
+                mutated_epitopes += 1
+
+    return mutated_epitopes > max_similar_epitopes
+
+
+def _transform_protvec_chunk_worker(args):
+    """Worker function for parallel ProtVec transformation."""
+    chunk_samples, triplet_to_index, epitopes_positions, context_size, window_size = args
+
+    result_samples = []
+    for sample in chunk_samples:
+        # Process each sample
+        sample_result = _transform_single_sample_protvec(
+            sample, triplet_to_index, epitopes_positions, context_size, window_size
+        )
+        result_samples.append(sample_result)
+
+    return result_samples
+
+
+def _transform_single_sample_protvec(sample, triplet_to_index, epitopes_positions, context_size, window_size):
+    """Transform a single sample to ProtVec indices."""
+    sample_protvec = []
+
+    for sequence in sample:
+        # Remove asterisk if present
+        if sequence.endswith('*'):
+            sequence = sequence[:-1]
+
+        sequence_protvec = []
+        for position in epitopes_positions:
+            start_pos = max(0, position - context_size)
+            end_pos = min(len(sequence), position + context_size + 1)
+            epitope_context = sequence[start_pos:end_pos]
+
+            # Create triplets from epitope context
+            sites_per_position = 1 + (2 * context_size)
+            triplets_num = sites_per_position - 2
+
+            if len(epitope_context) < 3:
+                triplet_indices = []
+            else:
+                triplets = [epitope_context[i:i+3] for i in range(min(triplets_num, len(epitope_context) - 2))]
+                # Convert triplets to ProtVec indices
+                triplet_indices = []
+                for triplet in triplets:
+                    if triplet in triplet_to_index:
+                        triplet_indices.append(triplet_to_index[triplet])
+                    else:
+                        triplet_indices.append(0)  # Default for unknown triplets
+
+            sequence_protvec.append(triplet_indices)
+        sample_protvec.append(sequence_protvec)
+
+    return sample_protvec
+
+
 class DatasetCreationPipeline:
     """Main class that orchestrates the dataset creation process."""
     
@@ -245,17 +672,46 @@ class DatasetCreationPipeline:
         self.prot_vec_file = self.data_config['prot_vec_file']
         self.final_dataset_file = self.data_config['final_dataset_file']
         
+        # Parallelization configuration
+        self.parallel_config = self.dataset_config.get('parallel', {})
+        self.parallel_windows = self.parallel_config.get('enabled', True)
+        self.window_workers = self.parallel_config.get('window_workers', min(8, multiprocessing.cpu_count() - 1))
+        self.sample_workers = self.parallel_config.get('sample_workers', 2)
+
+        # Checkpointing configuration
+        checkpoint_config = self.dataset_config.get('checkpoint', {})
+        self.checkpoint_enabled = checkpoint_config.get('enabled', True)
+        checkpoint_file = checkpoint_config.get('file', 'data/processed/dataset_checkpoint.pkl')
+        self.checkpoint_interval = checkpoint_config.get('interval', 10)
+
+        # Initialize checkpoint manager
+        if self.checkpoint_enabled:
+            self.checkpoint_manager = CheckpointManager(checkpoint_file)
+        else:
+            self.checkpoint_manager = None
+
         # Load ProtVec embeddings
         self.prot_vec_df = self._load_prot_vec_embeddings()
-        
+
+        # Initialize sequence cache (if enabled)
+        cache_config = self.dataset_config.get('cache', {})
+        self.cache_enabled = cache_config.get('enabled', True)
+        if self.cache_enabled:
+            logging.info("Initializing sequence cache...")
+            self.sequence_cache = SequenceCache(self.periods_unique_dir)
+            cache_stats = self.sequence_cache.get_cache_stats()
+            logging.info(f"Sequence cache initialized: {cache_stats}")
+        else:
+            self.sequence_cache = None
+
         # Initialize batch processor for streaming dataset creation
         self.batch_dataset_processor = BatchDatasetProcessor(
             config, self.epitopes_positions, self.window_size
         )
-        
+
         # Share ProtVec lookup with batch processor
         self.batch_dataset_processor.triplet_to_index = self.triplet_to_index
-        
+
         # Create output directory
         self._create_output_directory()
     
@@ -319,6 +775,10 @@ class DatasetCreationPipeline:
         logging.info(f"Created dataset with {total_samples} samples")
         logging.info(f"Mutation ratio: {mutation_ratio:.3f} ({mutated_samples}/{total_samples})")
         logging.info(f"Final duplicate rate: {duplicate_rate:.1%}")
+
+        # Clear checkpoint after successful completion
+        if self.checkpoint_manager:
+            self.checkpoint_manager.clear_checkpoint()
     
     def _run_with_refilling(self) -> None:
         """Run dataset creation with iterative refilling and early stopping."""
@@ -394,6 +854,10 @@ class DatasetCreationPipeline:
                     f"mutation ratio: {final_ratio:.3f} ({mutated_samples}/{total_samples})")
         logging.info(f"Average duplicate rate: {avg_duplicate_rate:.1%}")
         logging.info(f"Final duplication factor: {self.duplication_factor}")
+
+        # Clear checkpoint after successful completion
+        if self.checkpoint_manager:
+            self.checkpoint_manager.clear_checkpoint()
     
     def _create_dataset(self) -> pd.DataFrame:
         """Create the main dataset."""
@@ -448,64 +912,145 @@ class DatasetCreationPipeline:
         return windows
     
     def _create_sequence_samples(self, centroids_df: pd.DataFrame, windows: List[Dict]) -> List[List[str]]:
-        """Create sequence samples by linking clusters across windows."""
+        """Create sequence samples using parallel processing and checkpointing."""
         # Calculate number of sequence samples needed
-        # Each sequence sample creates one row per epitope position in final dataset
-        epitopes_pos_num = len(set(self.epitopes_positions))  # Unique epitope positions
+        epitopes_pos_num = len(set(self.epitopes_positions))
         total_dataset_size = getattr(self, 'current_dataset_size', self.dataset_size)
-        
-        # Total sequence samples needed = target dataset size / epitopes per sample
-        # Apply duplication factor to compensate for duplicate removal
+
         base_sequence_samples_needed = total_dataset_size // epitopes_pos_num
         total_sequence_samples_needed = int(base_sequence_samples_needed * self.duplication_factor)
         samples_per_window = max(1, total_sequence_samples_needed // len(windows))
-        
+
+        logging.info(f"=== PARALLEL SEQUENCE SAMPLE CREATION ===")
         logging.info(f"Unique epitope positions: {epitopes_pos_num}")
         logging.info(f"Target dataset size: {total_dataset_size}")
-        logging.info(f"Base sequence samples needed: {base_sequence_samples_needed}")
         logging.info(f"Duplication factor: {self.duplication_factor}")
-        logging.info(f"Total sequence samples needed (with duplication factor): {total_sequence_samples_needed}")
-        logging.info(f"Creating {samples_per_window} samples per window, {len(windows)} windows")
-        logging.info(f"Expected total sequence samples: {samples_per_window * len(windows)}")
-        logging.info(f"Expected pre-deduplication rows: {samples_per_window * len(windows)} × {epitopes_pos_num} = {samples_per_window * len(windows) * epitopes_pos_num}")
-        
+        logging.info(f"Total samples needed: {total_sequence_samples_needed}")
+        logging.info(f"Samples per window: {samples_per_window}")
+        logging.info(f"Windows to process: {len(windows)}")
+
+        if self.parallel_windows and self.cache_enabled:
+            return self._create_sequence_samples_parallel(
+                centroids_df, windows, samples_per_window
+            )
+        else:
+            logging.info("Using sequential processing (parallel disabled or cache unavailable)")
+            return self._create_sequence_samples_sequential(
+                centroids_df, windows, samples_per_window
+            )
+
+    def _create_sequence_samples_parallel(self, centroids_df: pd.DataFrame,
+                                         windows: List[Dict], samples_per_window: int) -> List[List[str]]:
+        """Create samples using parallel window processing with checkpointing."""
+        start_time = time.time()
+
+        # Check for existing checkpoint
+        if self.checkpoint_manager:
+            resume_point = self.checkpoint_manager.get_resume_point()
+            if resume_point > 0:
+                progress_info = self.checkpoint_manager.get_progress_info()
+                logging.info(f"Resuming from checkpoint: window {resume_point}, "
+                           f"already completed {progress_info['total_samples']} samples")
+        else:
+            resume_point = 0
+
+        # Prepare data for workers (must be serializable)
+        centroids_df_dict = centroids_df.to_dict()
+        sequence_cache_data = self.sequence_cache.cache if self.sequence_cache else {}
+
+        pipeline_config = {
+            'epitopes_positions': self.epitopes_positions,
+            'epitopes_similarity_threshold': self.epitopes_similarity_threshold,
+            'sample_workers': self.sample_workers
+        }
+
+        # Create worker arguments for windows that need processing
+        windows_to_process = [(i, w) for i, w in enumerate(windows) if i >= resume_point]
+        worker_args = [
+            (window_idx, window, samples_per_window, centroids_df_dict,
+             sequence_cache_data, pipeline_config)
+            for window_idx, window in windows_to_process
+        ]
+
+        logging.info(f"Processing {len(worker_args)} windows with {self.window_workers} parallel workers")
+
+        # Process windows in parallel
+        with multiprocessing.Pool(self.window_workers) as pool:
+            try:
+                # Process all windows in parallel
+                results = pool.map(_process_window_worker, worker_args)
+
+                # Save results with checkpointing
+                if self.checkpoint_manager:
+                    for window_idx, samples in results:
+                        self.checkpoint_manager.save_window_results(window_idx, samples)
+
+            except KeyboardInterrupt:
+                logging.info("Interrupted by user. Saving checkpoint...")
+                pool.terminate()
+                pool.join()
+                if self.checkpoint_manager:
+                    logging.info("Checkpoint saved. You can resume later.")
+                raise
+            except Exception as e:
+                logging.error(f"Parallel processing failed: {e}")
+                pool.terminate()
+                pool.join()
+                raise
+
+        # Collect all completed samples (including from checkpoint)
+        if self.checkpoint_manager:
+            all_samples = self.checkpoint_manager.get_completed_samples()
+        else:
+            all_samples = []
+            for _, samples in results:
+                all_samples.extend(samples)
+
+        elapsed_time = time.time() - start_time
+        failed_samples = (len(windows) * samples_per_window) - len(all_samples)
+
+        logging.info(f"=== PARALLEL PROCESSING COMPLETED ===")
+        logging.info(f"Total samples created: {len(all_samples)}")
+        logging.info(f"Failed samples: {failed_samples}")
+        logging.info(f"Processing time: {elapsed_time:.1f}s")
+        logging.info(f"Throughput: {len(all_samples) / elapsed_time:.1f} samples/sec")
+
+        return all_samples
+
+    def _create_sequence_samples_sequential(self, centroids_df: pd.DataFrame,
+                                          windows: List[Dict], samples_per_window: int) -> List[List[str]]:
+        """Fallback sequential processing method."""
         sequence_samples = []
         failed_samples = 0
-        
+
         for window_idx, window in enumerate(windows):
             logging.info(f"Processing window {window_idx + 1}/{len(windows)}: {window}")
-            
+
             for sample_idx in range(samples_per_window):
                 try:
-                    sample = self._create_single_sample(centroids_df, window)
+                    if self.cache_enabled:
+                        sample = self._create_single_sample_cached_fallback(centroids_df, window)
+                    else:
+                        sample = self._create_single_sample(centroids_df, window)
                     sequence_samples.append(sample)
                 except Exception as e:
                     failed_samples += 1
-                    logging.warning(f"Failed to create sample {sample_idx + 1} for window {window_idx + 1}: {e}")
+                    logging.warning(f"Failed to create sample {sample_idx + 1}: {e}")
                     continue
-        
-        # Add remaining samples to last window if needed
-        remaining_samples = total_sequence_samples_needed - len(sequence_samples)
-        if remaining_samples > 0 and windows:
-            logging.info(f"Creating {remaining_samples} additional samples in last window")
-            last_window = windows[-1]
-            for i in range(remaining_samples):
-                try:
-                    sample = self._create_single_sample(centroids_df, last_window)
-                    sequence_samples.append(sample)
-                except Exception as e:
-                    failed_samples += 1
-                    logging.warning(f"Failed to create remaining sample {i + 1}: {e}")
-                    continue
-        
-        logging.info(f"Created {len(sequence_samples)} sequence samples")
-        if failed_samples > 0:
-            logging.warning(f"Failed to create {failed_samples} samples due to mutation threshold or other errors")
-        
-        expected_final_rows = len(sequence_samples) * epitopes_pos_num
-        logging.info(f"Expected final dataset rows: {len(sequence_samples)} × {epitopes_pos_num} = {expected_final_rows}")
-        
+
+        logging.info(f"Sequential processing completed: {len(sequence_samples)} samples, {failed_samples} failed")
         return sequence_samples
+
+    def _create_single_sample_cached_fallback(self, centroids_df: pd.DataFrame, window: Dict) -> List[str]:
+        """Create a single sample using cache (fallback for sequential mode)."""
+        pipeline_config = {
+            'epitopes_positions': self.epitopes_positions,
+            'epitopes_similarity_threshold': self.epitopes_similarity_threshold,
+        }
+
+        return _create_single_sample_cached(
+            centroids_df, window, self.sequence_cache.cache, pipeline_config
+        )
     
     def _create_single_sample(self, centroids_df: pd.DataFrame, window: Dict) -> List[str]:
         """Create a single sequence sample by linking clusters."""
@@ -730,13 +1275,74 @@ class DatasetCreationPipeline:
         return epitope_samples
     
     def _transform_to_protvec_indices(self, epitope_samples: List[List[List[str]]]) -> List[List[List[List[int]]]]:
-        """Transform epitope contexts to ProtVec indices."""
+        """Transform epitope contexts to ProtVec indices using parallel processing."""
+        if not epitope_samples:
+            return []
+
+        # Check if parallel processing should be used
+        use_parallel = (
+            self.parallel_windows and
+            len(epitope_samples) > 100 and
+            self.window_workers > 1
+        )
+
+        if use_parallel:
+            return self._transform_to_protvec_indices_parallel(epitope_samples)
+        else:
+            return self._transform_to_protvec_indices_sequential(epitope_samples)
+
+    def _transform_to_protvec_indices_parallel(self, epitope_samples: List[List[List[str]]]) -> List[List[List[List[int]]]]:
+        """Parallel ProtVec transformation."""
+        start_time = time.time()
+        logging.info(f"=== PARALLEL PROTVEC TRANSFORMATION ===")
+        logging.info(f"Processing {len(epitope_samples)} samples with {self.window_workers} workers")
+
+        # Determine chunk size for workers
+        n_workers = min(self.window_workers, len(epitope_samples))
+        chunk_size = max(1, len(epitope_samples) // n_workers)
+
+        # Split samples into chunks
+        chunks = []
+        for i in range(0, len(epitope_samples), chunk_size):
+            chunk = epitope_samples[i:i + chunk_size]
+            chunks.append(chunk)
+
+        # Prepare worker arguments
+        worker_args = [
+            (chunk, self.triplet_to_index, self.epitopes_positions, self.context_size, self.window_size)
+            for chunk in chunks
+        ]
+
+        # Process chunks in parallel
+        with multiprocessing.Pool(n_workers) as pool:
+            try:
+                chunk_results = pool.map(_transform_protvec_chunk_worker, worker_args)
+            except Exception as e:
+                logging.error(f"Parallel ProtVec transformation failed: {e}")
+                pool.terminate()
+                pool.join()
+                # Fallback to sequential
+                return self._transform_to_protvec_indices_sequential(epitope_samples)
+
+        # Combine results from all chunks
         protvec_samples = []
-        
+        for chunk_result in chunk_results:
+            protvec_samples.extend(chunk_result)
+
+        elapsed_time = time.time() - start_time
+        logging.info(f"Parallel ProtVec transformation completed in {elapsed_time:.1f}s")
+        logging.info(f"Throughput: {len(protvec_samples) / elapsed_time:.1f} samples/sec")
+
+        return protvec_samples
+
+    def _transform_to_protvec_indices_sequential(self, epitope_samples: List[List[List[str]]]) -> List[List[List[List[int]]]]:
+        """Sequential ProtVec transformation (fallback)."""
+        protvec_samples = []
+
         for sample_idx, sample in enumerate(epitope_samples):
             if sample_idx % 100 == 0:
                 logging.info(f"Processing ProtVec transformation for sample {sample_idx + 1}/{len(epitope_samples)}")
-            
+
             sample_protvec = []
             for sequence_epitopes in sample:
                 sequence_protvec = []
@@ -748,7 +1354,7 @@ class DatasetCreationPipeline:
                     sequence_protvec.append(triplet_indices)
                 sample_protvec.append(sequence_protvec)
             protvec_samples.append(sample_protvec)
-        
+
         return protvec_samples
     
     def _create_triplets_from_epitope(self, epitope_context: str) -> List[str]:

@@ -167,7 +167,7 @@ create_dataset:
   ]
   epitopes_similarity_threshold: 0.5
   # Total desired samples in the final dataset.
-  dataset_size: 12680 # 317 positions * 40 samples
+  dataset_size: 1268000 # 317 positions * 400 samples
   # Duplication factor to compensate for high duplicate removal rates
   duplication_factor: 5
   # For refilling dataset to meet ratio
@@ -176,6 +176,22 @@ create_dataset:
     max_iterations: 200
     target_mutated_ratio: 0.2
     early_stopping_threshold: 0.95
+
+  # Parallel processing configuration
+  parallel:
+    enabled: true
+    window_workers: 8  # Number of parallel window processors
+    sample_workers: 2  # Samples created in parallel per window
+
+  # Checkpointing for resumable processing
+  checkpoint:
+    enabled: true
+    file: "data/processed/dataset_checkpoint.pkl"
+    interval: 10  # Save progress every N windows
+
+  # Sequence caching for fast retrieval
+  cache:
+    enabled: true  # Pre-load all sequences at startup
 
 # 5. Train Model (from training.py, models.py)
 train:
