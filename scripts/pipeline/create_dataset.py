@@ -321,34 +321,48 @@ class DatasetCreationPipeline:
         logging.info(f"Final duplicate rate: {duplicate_rate:.1%}")
     
     def _run_with_refilling(self) -> None:
-        """Run dataset creation with iterative refilling to achieve target ratio."""
+        """Run dataset creation with iterative refilling and early stopping."""
         refiller_config = self.dataset_config['refiller']
         max_iterations = refiller_config.get('max_iterations', 20)
         target_ratio = refiller_config.get('target_mutated_ratio', 0.2)
-        
-        logging.info(f"Running dataset creation with refilling (target ratio: {target_ratio})")
-        
-        # Create initial dataset
+        early_stopping_threshold = refiller_config.get('early_stopping_threshold', 0.95)
+
+        logging.info(f"Running with refilling (target ratio: {target_ratio})")
+
         dataset_df = self._create_dataset()
         dataset_df, initial_duplicate_rate = self._remove_duplicates(dataset_df)
-        
-        # Track duplicate rates for adaptive generation
+
         duplicate_rates = [initial_duplicate_rate]
-        
+        no_improvement_count = 0
+        best_size = len(dataset_df)
+
         for iteration in range(1, max_iterations + 1):
-            # Calculate current statistics
             total_samples = len(dataset_df)
             mutated_samples = len(dataset_df[dataset_df['y'] == 1])
             current_ratio = mutated_samples / total_samples if total_samples > 0 else 0
-            
-            logging.info(f"Iteration {iteration}/{max_iterations}: {total_samples} samples, "
-                        f"mutation ratio: {current_ratio:.3f}")
-            
+
+            logging.info(f"Iteration {iteration}: {total_samples} samples, ratio: {current_ratio:.3f}")
+
+            # Early stopping conditions
+            if total_samples >= self.dataset_size * early_stopping_threshold:
+                logging.info(f"Early stopping: {early_stopping_threshold*100}% of target reached")
+                break
+
+            # Check for improvement
+            if total_samples <= best_size:
+                no_improvement_count += 1
+                if no_improvement_count >= 3:
+                    logging.info("Early stopping: No improvement for 3 iterations")
+                    break
+            else:
+                best_size = total_samples
+                no_improvement_count = 0
+
             # Check if target dataset size is achieved
             if total_samples >= self.dataset_size:
                 logging.info(f"Target dataset size {self.dataset_size} achieved!")
                 break
-            
+
             # Calculate how many more samples we need
             needed_samples = self.dataset_size - total_samples
             if needed_samples > 0:
@@ -357,16 +371,16 @@ class DatasetCreationPipeline:
                 if avg_duplicate_rate > 0.8:  # If >80% duplicates, increase factor
                     self.duplication_factor = min(50, int(self.duplication_factor * 1.5))
                     logging.info(f"High duplicate rate ({avg_duplicate_rate:.1%}), increasing duplication factor to {self.duplication_factor}")
-                
+
                 # Create additional samples
                 self.current_dataset_size = needed_samples
                 additional_df = self._create_dataset()
-                
+
                 # Combine datasets and remove duplicates
                 dataset_df = pd.concat([dataset_df, additional_df], ignore_index=True)
                 dataset_df, iteration_duplicate_rate = self._remove_duplicates(dataset_df)
                 duplicate_rates.append(iteration_duplicate_rate)
-        
+
         # Save final dataset
         self._save_dataset(dataset_df)
         

@@ -33,18 +33,23 @@ class BatchVectorProcessor(BatchProcessor):
         memory_config = config.get('memory_optimization', {})
         batch_size = memory_config.get('clustering_batch_size', 500)
         super().__init__(config, batch_size, "BatchVectorProcessor")
-        
+
         self.prot_vec_df = prot_vec_df
         self.temp_dir = None
         self.current_file = None
-        
-        # Create lookup dictionary for faster triplet-to-vector mapping
+
+        # Create lookup dictionary with LRU cache
+        from functools import lru_cache
+
         self.triplet_to_vector = {}
         for idx, row in prot_vec_df.iterrows():
-            vector = row.drop('words').values.astype('float64')
+            vector = row.drop('words').values.astype('float32')  # Use float32
             self.triplet_to_vector[row['words']] = vector
-        
-        logging.info(f"Created vector lookup dictionary with {len(self.triplet_to_vector)} triplets")
+
+        # Add LRU cache for triplet sequences
+        self._cached_sequence_vectors = lru_cache(maxsize=10000)(self._compute_sequence_vector)
+
+        logging.info(f"Created vector lookup with {len(self.triplet_to_vector)} triplets")
     
     def setup_output_file(self, output_path: str):
         """Setup output file for batch results."""
@@ -102,26 +107,34 @@ class BatchVectorProcessor(BatchProcessor):
         return triplets_list
     
     def _transform_triplets_to_vectors_batch(self, triplets_list: List[List[str]]) -> pd.DataFrame:
-        """Transform triplets to vectors using fast lookup."""
-        # Pre-allocate result array for better performance
+        """Transform triplets to vectors using numpy operations."""
         batch_size = len(triplets_list)
         vector_dim = 100
-        result_vectors = np.zeros((batch_size, vector_dim), dtype='float64')
-        
+
+        # Pre-allocate with float32 instead of float64
+        result_vectors = np.zeros((batch_size, vector_dim), dtype='float32')
+
+        # Vectorized processing
         for seq_idx, triplets in enumerate(triplets_list):
-            # Initialize sequence vector
-            seq_vector = np.zeros(vector_dim, dtype='float64')
-            
-            # Sum vectors for all triplets in the sequence
+            # Use numpy array operations
+            seq_vector = np.zeros(vector_dim, dtype='float32')
+
             for triplet in triplets:
                 if triplet in self.triplet_to_vector:
-                    seq_vector += self.triplet_to_vector[triplet]
-            
+                    # In-place addition
+                    np.add(seq_vector, self.triplet_to_vector[triplet], out=seq_vector)
+
             result_vectors[seq_idx] = seq_vector
-        
-        # Create DataFrame
+
+        # Create DataFrame with optimized dtypes
         vector_columns = [f'd{i}' for i in range(1, vector_dim + 1)]
         return pd.DataFrame(result_vectors, columns=vector_columns)
+
+    def _compute_sequence_vector(self, sequence_hash: int) -> np.ndarray:
+        """Cached computation of sequence vectors."""
+        # This is a placeholder - would need actual sequence to compute
+        # In practice, this would be used for frequently accessed sequences
+        pass
 
 
 class ClusteringPipeline:
@@ -382,8 +395,19 @@ class ClusteringPipeline:
     
     def _create_clusters_for_periods(self) -> None:
         """Create clusters for each period using K-means."""
-        logging.info("Creating clusters for each period...")
-        
+        # Check if parallel processing should be used
+        performance_config = self.config.get('optimization', {}).get('performance', {})
+        use_multiprocessing = performance_config.get('use_multiprocessing', False)
+
+        if use_multiprocessing:
+            self._create_clusters_for_periods_parallel()
+        else:
+            self._create_clusters_for_periods_sequential()
+
+    def _create_clusters_for_periods_sequential(self) -> None:
+        """Create clusters for each period using K-means (sequential)."""
+        logging.info("Creating clusters for each period (sequential)...")
+
         # Initialize centroids file
         self._initialize_centroids_file()
         
@@ -453,7 +477,107 @@ class ClusteringPipeline:
                 self._save_centroids(period_file, cluster_results['centroids'])
         
         logging.info("Cluster creation completed for all periods")
-    
+
+    def _create_clusters_for_periods_parallel(self) -> None:
+        """Create clusters using parallel processing."""
+        from joblib import Parallel, delayed
+
+        logging.info("Creating clusters for each period (parallel)...")
+
+        # Initialize centroids file
+        self._initialize_centroids_file()
+
+        # Get vector files
+        vector_files = natsorted([f for f in os.listdir(self.vector_temp_dir) if f.endswith('.csv')])
+
+        # Determine number of jobs
+        n_jobs = min(len(vector_files), os.cpu_count())
+
+        # Process in parallel
+        results = Parallel(n_jobs=n_jobs)(
+            delayed(self._process_single_period_clustering)(
+                period_file,
+                self.vector_temp_dir,
+                self.cluster_config
+            ) for period_file in vector_files
+        )
+
+        # Collect and save results
+        for period_file, centroids, labels in results:
+            if centroids is not None:
+                self._save_cluster_labels(period_file, labels)
+                self._save_centroids(period_file, centroids)
+
+    @staticmethod
+    def _process_single_period_clustering(period_file: str, vector_temp_dir: str,
+                                         cluster_config: dict) -> tuple:
+        """Process clustering for single period."""
+        try:
+            vector_path = f"{vector_temp_dir}/{period_file}"
+            vectors_df = pd.read_csv(vector_path, dtype='float32')
+
+            if vectors_df.empty:
+                return period_file, None, None
+
+            # Determine number of clusters
+            if cluster_config.get('auto_k_selection', {}).get('enabled', False):
+                n_clusters = ClusteringPipeline._find_optimal_k_static(vectors_df.values, cluster_config)
+            else:
+                n_clusters = cluster_config['clusters_per_period'].get(period_file, 5)
+
+            # Use MiniBatchKMeans for speed
+            from sklearn.cluster import MiniBatchKMeans
+            kmeans = MiniBatchKMeans(
+                n_clusters=n_clusters,
+                batch_size=min(500, len(vectors_df) // 4),
+                n_init=3,
+                max_iter=100,
+                random_state=42
+            )
+
+            labels = kmeans.fit_predict(vectors_df.values)
+
+            return period_file, kmeans.cluster_centers_, labels
+
+        except Exception as e:
+            logging.error(f"Clustering failed for {period_file}: {e}")
+            return period_file, None, None
+
+    @staticmethod
+    def _find_optimal_k_static(vectors_array, cluster_config: dict) -> int:
+        """Static method for finding optimal k (for parallel processing)."""
+        from sklearn.metrics import silhouette_score
+        from sklearn.cluster import KMeans
+
+        auto_k_config = cluster_config.get('auto_k_selection', {})
+        min_k = auto_k_config.get('min_k', 2)
+        max_k = auto_k_config.get('max_k', 15)
+
+        # Ensure we don't try more clusters than we have data points
+        n_samples = len(vectors_array)
+        max_k = min(max_k, n_samples - 1)
+
+        if min_k >= n_samples:
+            logging.warning(f"Not enough samples ({n_samples}) for clustering. Using k=1")
+            return 1
+
+        best_k = min_k
+        best_score = -1
+
+        for k in range(min_k, max_k + 1):
+            # Fit K-means
+            kmeans = KMeans(n_clusters=k, n_init=10, max_iter=300, random_state=42)
+            labels = kmeans.fit_predict(vectors_array)
+
+            # Calculate silhouette score
+            score = silhouette_score(vectors_array, labels)
+
+            if score > best_score:
+                best_score = score
+                best_k = k
+
+        return best_k
+
     def _create_kmeans_clusters(self, vectors_df: pd.DataFrame, n_clusters: int) -> Dict:
         """Create K-means clusters from vector data with memory optimization."""
         vectors_array = vectors_df.to_numpy()

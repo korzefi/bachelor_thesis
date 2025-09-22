@@ -85,43 +85,104 @@ class ClusterLinkingPipeline:
     
     def _create_cluster_links(self, df: pd.DataFrame) -> List[str]:
         """Create links between clusters in consecutive periods."""
-        logging.info("Creating cluster links between consecutive periods...")
-        
+        # Check if approximate NN should be used
+        algorithms_config = self.config.get('optimization', {}).get('algorithms', {})
+        use_approximate_nn = algorithms_config.get('use_approximate_nn', False)
+
+        if use_approximate_nn:
+            return self._create_cluster_links_approximate(df)
+        else:
+            return self._create_cluster_links_exact(df)
+
+    def _create_cluster_links_approximate(self, df: pd.DataFrame) -> List[str]:
+        """Create links using approximate nearest neighbors."""
+        try:
+            import faiss  # Facebook's efficient similarity search
+        except ImportError:
+            logging.warning("FAISS not available, falling back to exact method")
+            return self._create_cluster_links_exact(df)
+
+        logging.info("Creating cluster links using approximate NN...")
+
         periods = df['period'].unique()
-        
+        feature_columns = [f'd{i}' for i in range(1, 101)]
+
+        # Build index for each period
+        period_indices = {}
+        for period in periods:
+            period_data = df[df['period'] == period][feature_columns].values.astype('float32')
+
+            # Create FAISS index
+            dimension = period_data.shape[1]
+            index = faiss.IndexFlatL2(dimension)  # L2 distance
+            index.add(period_data)
+
+            period_indices[period] = {
+                'index': index,
+                'data': period_data,
+                'cluster_ids': df[df['period'] == period]['cluster'].values
+            }
+
+        # Find nearest neighbors between consecutive periods
+        links = {}
+        for i in range(len(periods) - 1):
+            current_period = periods[i]
+            next_period = periods[i + 1]
+
+            current_data = period_indices[current_period]['data']
+            next_index = period_indices[next_period]['index']
+
+            # Find k nearest neighbors
+            k = min(3, len(period_indices[next_period]['data']))
+            distances, indices = next_index.search(current_data, k)
+
+            # Store links
+            for j, neighbors in enumerate(indices):
+                current_cluster = period_indices[current_period]['cluster_ids'][j]
+                next_clusters = [period_indices[next_period]['cluster_ids'][n] for n in neighbors]
+                links[current_cluster] = next_clusters
+
+        return links
+
+    def _create_cluster_links_exact(self, df: pd.DataFrame) -> List[str]:
+        """Create links between clusters in consecutive periods (exact method)."""
+        logging.info("Creating cluster links between consecutive periods (exact)...")
+
+        periods = df['period'].unique()
+
         if len(periods) < 2:
             raise ValueError("Need at least 2 periods to create cluster links")
-        
+
         logging.info(f"Linking clusters across {len(periods)} periods: {periods}")
-        
+
         # Get 100-dimensional feature columns
         feature_columns = [f'd{i}' for i in range(1, 101)]
-        
+
         # Initialize link dictionaries
         forward_links = {}  # {current_period_row_idx: next_period_row_idx}
         backward_links = {}  # {next_period_row_idx: current_period_row_idx}
-        
+
         # Create links between consecutive periods
         for i in range(len(periods) - 1):
             current_period = periods[i]
             next_period = periods[i + 1]
-            
+
             logging.info(f"Linking {current_period} -> {next_period}")
-            
+
             # Forward links: for each cluster in current period, find closest in next period
             forward_links.update(
                 self._create_forward_links(df, current_period, next_period, feature_columns)
             )
-            
+
             # Backward links: for each cluster in next period, find closest in current period
             backward_links.update(
                 self._create_backward_links(df, current_period, next_period, feature_columns)
             )
-        
+
         # Combine and format links
         combined_links = self._combine_bidirectional_links(forward_links, backward_links)
         cluster_link_strings = self._format_cluster_links(df, combined_links)
-        
+
         return cluster_link_strings
     
     def _create_forward_links(

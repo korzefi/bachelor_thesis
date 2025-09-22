@@ -9,6 +9,8 @@ import pandas as pd
 from datetime import datetime
 from abc import ABC, abstractmethod
 from typing import Iterator, Any, Optional, Dict
+from contextlib import contextmanager
+import weakref
 
 
 def get_root_path():
@@ -75,44 +77,95 @@ def get_time_string(time):
     return time_string
 
 
+@contextmanager
+def memory_managed_operation(operation_name: str, threshold_mb: float = 100):
+    """Context manager for memory-intensive operations."""
+    process = psutil.Process()
+    initial_memory = process.memory_info().rss / 1024 / 1024
+
+    logging.debug(f"Starting {operation_name}: {initial_memory:.1f}MB")
+
+    try:
+        yield
+    finally:
+        gc.collect()
+        final_memory = process.memory_info().rss / 1024 / 1024
+        delta = final_memory - initial_memory
+
+        if delta > threshold_mb:
+            logging.warning(f"{operation_name} used {delta:.1f}MB memory")
+            # Force aggressive cleanup
+            gc.collect(2)  # Full collection
+
+
 class MemoryMonitor:
     """Monitor and manage memory usage during processing."""
-    
+
     def __init__(self, max_memory_mb: Optional[int] = None, gc_frequency: int = 100):
         self.max_memory_mb = max_memory_mb
         self.gc_frequency = gc_frequency
         self.batch_count = 0
         self.process = psutil.Process()
-    
+        self.memory_history = []
+        self.peak_memory = 0
+
     def get_memory_usage_mb(self) -> float:
         """Get current memory usage in MB."""
-        return self.process.memory_info().rss / 1024 / 1024
-    
+        usage = self.process.memory_info().rss / 1024 / 1024
+        self.peak_memory = max(self.peak_memory, usage)
+        self.memory_history.append(usage)
+
+        # Keep only last 100 measurements
+        if len(self.memory_history) > 100:
+            self.memory_history = self.memory_history[-100:]
+
+        return usage
+
+    def predict_memory_usage(self, batches_ahead: int) -> float:
+        """Predict future memory usage based on trend."""
+        if len(self.memory_history) < 2:
+            return self.get_memory_usage_mb()
+
+        # Calculate trend
+        recent = self.memory_history[-10:]
+        trend = (recent[-1] - recent[0]) / len(recent) if len(recent) > 1 else 0
+
+        return self.get_memory_usage_mb() + (trend * batches_ahead)
+
     def check_memory_limit(self) -> bool:
         """Check if memory usage exceeds limit."""
         if self.max_memory_mb is None:
             return False
         return self.get_memory_usage_mb() > self.max_memory_mb
-    
+
     def force_garbage_collection(self) -> None:
-        """Force garbage collection and log memory usage."""
+        """Force garbage collection with multiple generations."""
         initial_memory = self.get_memory_usage_mb()
-        gc.collect()
+
+        # Collect all generations
+        for generation in range(3):
+            gc.collect(generation)
+
+        # Clear caches
+        if hasattr(gc, 'freeze'):
+            gc.freeze()  # Freeze tracked objects
+            gc.collect()
+            gc.unfreeze()
+
         final_memory = self.get_memory_usage_mb()
         freed_mb = initial_memory - final_memory
-        
-        if freed_mb > 0:
-            logging.info(f"Garbage collection freed {freed_mb:.1f}MB memory")
-        logging.debug(f"Memory usage: {final_memory:.1f}MB")
-    
+
+        if freed_mb > 10:
+            logging.info(f"GC freed {freed_mb:.1f}MB (peak: {self.peak_memory:.1f}MB)")
+
     def batch_completed(self) -> None:
         """Call this after each batch completion."""
         self.batch_count += 1
-        
+
         # Periodic garbage collection
         if self.batch_count % self.gc_frequency == 0:
             self.force_garbage_collection()
-        
+
         # Memory limit check
         if self.check_memory_limit():
             current_memory = self.get_memory_usage_mb()
@@ -246,3 +299,103 @@ class DataFrameChunker:
                     os.remove(file_path)
         
         logging.info(f"CSV merge completed: {output_file}")
+
+
+class ParquetHandler:
+    """Handle Parquet file operations efficiently."""
+
+    @staticmethod
+    def csv_to_parquet(csv_path: str, parquet_path: str,
+                       chunksize: int = 100000, compression: str = 'snappy'):
+        """Convert CSV to Parquet with streaming."""
+        try:
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+
+            # Read first chunk to get schema
+            first_chunk = pd.read_csv(csv_path, nrows=1000)
+            schema = pa.Schema.from_pandas(first_chunk)
+
+            # Create Parquet writer
+            writer = pq.ParquetWriter(parquet_path, schema, compression=compression)
+
+            # Write chunks
+            for chunk in pd.read_csv(csv_path, chunksize=chunksize):
+                table = pa.Table.from_pandas(chunk, schema=schema)
+                writer.write_table(table)
+
+            writer.close()
+
+        except ImportError:
+            logging.warning("PyArrow not available, falling back to CSV format")
+            return False
+        except Exception as e:
+            logging.error(f"Parquet conversion failed: {e}")
+            return False
+
+        return True
+
+    @staticmethod
+    def read_parquet_streaming(parquet_path: str, batch_size: int = 10000):
+        """Read Parquet file in batches."""
+        try:
+            import pyarrow.parquet as pq
+
+            parquet_file = pq.ParquetFile(parquet_path)
+
+            for batch in parquet_file.iter_batches(batch_size=batch_size):
+                yield batch.to_pandas()
+
+        except ImportError:
+            logging.warning("PyArrow not available, cannot read Parquet files")
+            return None
+
+
+class BatchWriter:
+    """Efficient batch writing for large datasets."""
+
+    def __init__(self, output_path: str, format: str = 'csv',
+                 batch_size: int = 10000, compression: str = None):
+        self.output_path = output_path
+        self.format = format
+        self.batch_size = batch_size
+        self.compression = compression
+        self.buffer = []
+        self.header_written = False
+
+    def write(self, data: pd.DataFrame):
+        """Add data to buffer and flush if needed."""
+        self.buffer.append(data)
+
+        # Calculate total buffer size
+        total_rows = sum(len(df) for df in self.buffer)
+
+        if total_rows >= self.batch_size:
+            self.flush()
+
+    def flush(self):
+        """Write buffer to file."""
+        if not self.buffer:
+            return
+
+        combined = pd.concat(self.buffer, ignore_index=True)
+
+        if self.format == 'csv':
+            mode = 'a' if self.header_written else 'w'
+            combined.to_csv(self.output_path, mode=mode,
+                          header=not self.header_written, index=False)
+            self.header_written = True
+        elif self.format == 'parquet':
+            if os.path.exists(self.output_path):
+                # Append to existing parquet
+                existing = pd.read_parquet(self.output_path)
+                combined = pd.concat([existing, combined], ignore_index=True)
+            combined.to_parquet(self.output_path, compression=self.compression)
+
+        self.buffer = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.flush()

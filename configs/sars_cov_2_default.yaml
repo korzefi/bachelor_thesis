@@ -2,18 +2,68 @@
 project_name: "SARS-CoV-2-Spike-Mutation"
 protein_name: "SARS-CoV-2 Spike"
 
-# --- MEMORY OPTIMIZATION ---
+# --- OPTIMIZATION SETTINGS ---
+optimization:
+  enabled: true
+
+  memory:
+    use_streaming: true
+    use_memory_mapping: false  # Enable if RAM < 4GB
+    max_memory_mb: 4096
+    gc_frequency: 100
+    gc_aggressive: true
+
+  performance:
+    use_multiprocessing: true
+    n_workers: auto  # Will use cpu_count()
+    use_vectorization: true
+    cache_enabled: true
+    cache_size: 10000
+
+  io:
+    file_format: parquet  # csv or parquet
+    compression: snappy
+    batch_size: 10000
+
+  algorithms:
+    use_approximate_nn: false  # Set true for very large datasets
+    early_stopping_threshold: 0.95
+
+# --- ERROR HANDLING ---
+error_handling:
+  # Skip corrupted files instead of stopping entire pipeline
+  skip_corrupted_files: true
+
+  # Stop pipeline if too many consecutive files fail (prevents infinite loops)
+  max_consecutive_failures: 10
+
+  # Try multiple encodings when UTF-8 fails
+  encoding_fallback_chain: ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+
+  # Generate detailed error reports
+  save_error_report: true
+  error_report_path: "data/processed/error_report.json"
+
+  # Quarantine corrupted files for manual inspection
+  quarantine_corrupted_files: true
+  quarantine_dir: "data/processed/quarantine"
+
+  # Progress tracking and resumability
+  enable_checkpoints: true
+  checkpoint_file: "data/processed/pipeline_progress.json"
+
+# --- MEMORY OPTIMIZATION (LEGACY) ---
 memory_optimization:
   # Batch sizes for different operations
-  data_preparation_batch_size: 1000
-  clustering_batch_size: 500
-  dataset_creation_batch_size: 100
+  data_preparation_batch_size: 5000  # Increased from 1000
+  clustering_batch_size: 1000  # Increased from 500
+  dataset_creation_batch_size: 500  # Increased from 100
   protvec_batch_size: 50
-  
+
   # Memory limits
   max_memory_mb: 4096
   gc_frequency: 100  # Garbage collection every N batches
-  
+
   # I/O optimization
   use_streaming: true
   intermediate_saves: true
@@ -52,7 +102,7 @@ prepare:
   split_fasta:
     start_line: 1  # Start line for processing (allows resuming from specific position)
     lines_per_file: 100000
-    max_files: 10
+    max_files: 10000
   # Configurable FASTA filename prefix (replaces hardcoded 'spikeprot_batch_data')
   fasta_prefix: "spikeprot_batch_data"
   clean_sequences:
@@ -125,6 +175,7 @@ create_dataset:
     enabled: true
     max_iterations: 200
     target_mutated_ratio: 0.2
+    early_stopping_threshold: 0.95
 
 # 5. Train Model (from training.py, models.py)
 train:
