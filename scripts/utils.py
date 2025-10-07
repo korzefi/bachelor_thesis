@@ -7,10 +7,10 @@ import psutil
 import logging
 import pandas as pd
 from datetime import datetime
+from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Iterator, Any, Optional, Dict
 from contextlib import contextmanager
-import weakref
 
 
 def get_root_path():
@@ -19,17 +19,38 @@ def get_root_path():
     return '/'.join(splitted)
 
 
-def create_dir(path):
-    try:
-        os.makedirs(path)
-    except FileExistsError:
-        logging.warning(f'{path} already exists')
+def create_dir(path, log_level='debug'):
+    """
+    Create a directory if it doesn't exist.
 
+    Args:
+        path: Directory path to create
+        log_level: Logging level ('debug', 'info', 'warning')
+    """
+    path_obj = Path(path)
 
-def get_formatted_datetime():
-    current_datetime = datetime.now()
-    formatted_datetime = current_datetime.strftime("%d-%m-%Y_%H-%M")
-    return formatted_datetime
+    if path_obj.exists():
+        if path_obj.is_dir():
+            if log_level == 'debug':
+                logging.debug(f"✓ Directory already exists: {path}")
+            elif log_level == 'info':
+                logging.info(f"✓ Using existing directory: {path}")
+            elif log_level == 'warning':
+                logging.warning(f"Directory already exists: {path}")
+        else:
+            logging.error(f"✗ Path exists but is not a directory: {path}")
+            raise NotADirectoryError(f"Path exists but is not a directory: {path}")
+    else:
+        try:
+            os.makedirs(path, exist_ok=True)
+            if log_level in ('info', 'warning'):
+                logging.info(f"✓ Created directory: {path}")
+            else:
+                logging.debug(f"✓ Created directory: {path}")
+        except OSError as e:
+            logging.error(f"✗ Failed to create directory {path}: {e}")
+            raise
+
 
 
 def setup_logger(process_id=None, date=True, time=True, verbose=False):
@@ -182,7 +203,7 @@ class BatchProcessor(ABC):
         self.component_name = component_name
         
         # Initialize memory monitor
-        memory_config = config.get('memory_optimization', {})
+        memory_config = config.get('optimization', {}).get('memory', {})
         max_memory = memory_config.get('max_memory_mb')
         gc_frequency = memory_config.get('gc_frequency', 100)
         self.memory_monitor = MemoryMonitor(max_memory, gc_frequency)
@@ -301,101 +322,3 @@ class DataFrameChunker:
         logging.info(f"CSV merge completed: {output_file}")
 
 
-class ParquetHandler:
-    """Handle Parquet file operations efficiently."""
-
-    @staticmethod
-    def csv_to_parquet(csv_path: str, parquet_path: str,
-                       chunksize: int = 100000, compression: str = 'snappy'):
-        """Convert CSV to Parquet with streaming."""
-        try:
-            import pyarrow as pa
-            import pyarrow.parquet as pq
-
-            # Read first chunk to get schema
-            first_chunk = pd.read_csv(csv_path, nrows=1000)
-            schema = pa.Schema.from_pandas(first_chunk)
-
-            # Create Parquet writer
-            writer = pq.ParquetWriter(parquet_path, schema, compression=compression)
-
-            # Write chunks
-            for chunk in pd.read_csv(csv_path, chunksize=chunksize):
-                table = pa.Table.from_pandas(chunk, schema=schema)
-                writer.write_table(table)
-
-            writer.close()
-
-        except ImportError:
-            logging.warning("PyArrow not available, falling back to CSV format")
-            return False
-        except Exception as e:
-            logging.error(f"Parquet conversion failed: {e}")
-            return False
-
-        return True
-
-    @staticmethod
-    def read_parquet_streaming(parquet_path: str, batch_size: int = 10000):
-        """Read Parquet file in batches."""
-        try:
-            import pyarrow.parquet as pq
-
-            parquet_file = pq.ParquetFile(parquet_path)
-
-            for batch in parquet_file.iter_batches(batch_size=batch_size):
-                yield batch.to_pandas()
-
-        except ImportError:
-            logging.warning("PyArrow not available, cannot read Parquet files")
-            return None
-
-
-class BatchWriter:
-    """Efficient batch writing for large datasets."""
-
-    def __init__(self, output_path: str, format: str = 'csv',
-                 batch_size: int = 10000, compression: str = None):
-        self.output_path = output_path
-        self.format = format
-        self.batch_size = batch_size
-        self.compression = compression
-        self.buffer = []
-        self.header_written = False
-
-    def write(self, data: pd.DataFrame):
-        """Add data to buffer and flush if needed."""
-        self.buffer.append(data)
-
-        # Calculate total buffer size
-        total_rows = sum(len(df) for df in self.buffer)
-
-        if total_rows >= self.batch_size:
-            self.flush()
-
-    def flush(self):
-        """Write buffer to file."""
-        if not self.buffer:
-            return
-
-        combined = pd.concat(self.buffer, ignore_index=True)
-
-        if self.format == 'csv':
-            mode = 'a' if self.header_written else 'w'
-            combined.to_csv(self.output_path, mode=mode,
-                          header=not self.header_written, index=False)
-            self.header_written = True
-        elif self.format == 'parquet':
-            if os.path.exists(self.output_path):
-                # Append to existing parquet
-                existing = pd.read_parquet(self.output_path)
-                combined = pd.concat([existing, combined], ignore_index=True)
-            combined.to_parquet(self.output_path, compression=self.compression)
-
-        self.buffer = []
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        self.flush()

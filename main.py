@@ -14,6 +14,7 @@ from pathlib import Path
 
 from scripts.config import load_config
 from scripts.utils import setup_logger
+from scripts.validation import validate_pipeline_step_inputs, ValidationError
 
 def setup_argument_parser() -> argparse.ArgumentParser:
     """Setup command line argument parser with subcommands."""
@@ -80,11 +81,21 @@ Examples:
 def run_prepare_step(config: dict) -> None:
     """Run data preparation step."""
     try:
+        # Validate required input files before starting
+        logging.info("="*70)
+        logging.info("STEP 1: DATA PREPARATION - Pre-flight validation")
+        logging.info("="*70)
+        validate_pipeline_step_inputs('prepare', config)
+
         # Import here to avoid circular imports and only when needed
         from scripts.pipeline.prepare_data import run
         logging.info("Starting data preparation step...")
         run(config)
         logging.info("Data preparation completed successfully.")
+    except ValidationError as e:
+        logging.error(f"Validation failed: {e}")
+        logging.error("Cannot proceed with data preparation. Please fix the issues above.")
+        sys.exit(1)
     except ImportError:
         logging.error("Data preparation module not found. Make sure scripts.pipeline.prepare_data exists.")
         sys.exit(1)
@@ -95,18 +106,28 @@ def run_prepare_step(config: dict) -> None:
 def run_cluster_step(config: dict) -> None:
     """Run clustering and cluster linking steps."""
     try:
+        # Validate required input files before starting
+        logging.info("="*70)
+        logging.info("STEP 2: CLUSTERING - Pre-flight validation")
+        logging.info("="*70)
+        validate_pipeline_step_inputs('cluster', config)
+
         # Import here to avoid circular imports and only when needed
         from scripts.pipeline.create_clusters import run as run_clustering
         from scripts.pipeline.link_clusters import run as run_linking
-        
+
         logging.info("Starting clustering step...")
         run_clustering(config)
         logging.info("Clustering completed successfully.")
-        
+
         logging.info("Starting cluster linking step...")
         run_linking(config)
         logging.info("Cluster linking completed successfully.")
-        
+
+    except ValidationError as e:
+        logging.error(f"Validation failed: {e}")
+        logging.error("Cannot proceed with clustering. Please fix the issues above.")
+        sys.exit(1)
     except ImportError as e:
         logging.error(f"Clustering modules not found: {e}")
         sys.exit(1)
@@ -117,11 +138,21 @@ def run_cluster_step(config: dict) -> None:
 def run_dataset_step(config: dict) -> None:
     """Run dataset creation step."""
     try:
+        # Validate required input files before starting
+        logging.info("="*70)
+        logging.info("STEP 3: DATASET CREATION - Pre-flight validation")
+        logging.info("="*70)
+        validate_pipeline_step_inputs('dataset', config)
+
         # Import here to avoid circular imports and only when needed
         from scripts.pipeline.create_dataset import run
         logging.info("Starting dataset creation step...")
         run(config)
         logging.info("Dataset creation completed successfully.")
+    except ValidationError as e:
+        logging.error(f"Validation failed: {e}")
+        logging.error("Cannot proceed with dataset creation. Please fix the issues above.")
+        sys.exit(1)
     except ImportError:
         logging.error("Dataset creation module not found. Make sure scripts.pipeline.create_dataset exists.")
         sys.exit(1)
@@ -132,11 +163,21 @@ def run_dataset_step(config: dict) -> None:
 def run_train_step(config: dict) -> None:
     """Run model training and evaluation step."""
     try:
+        # Validate required input files before starting
+        logging.info("="*70)
+        logging.info("STEP 4: MODEL TRAINING - Pre-flight validation")
+        logging.info("="*70)
+        validate_pipeline_step_inputs('train', config)
+
         # Import here to avoid circular imports and only when needed
         from scripts.pipeline.train_model import run
         logging.info("Starting model training step...")
         run(config)
         logging.info("Model training completed successfully.")
+    except ValidationError as e:
+        logging.error(f"Validation failed: {e}")
+        logging.error("Cannot proceed with training. Please fix the issues above.")
+        sys.exit(1)
     except ImportError:
         logging.error("Training module not found. Make sure scripts.pipeline.train_model exists.")
         sys.exit(1)

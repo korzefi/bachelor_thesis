@@ -29,13 +29,14 @@ from joblib import Parallel, delayed
 
 import scripts.utils as utils
 from scripts.utils import BatchProcessor, DataFrameChunker
+from scripts.validation import validate_file_exists, validate_directory_exists
 
 
 class BatchDatasetProcessor(BatchProcessor):
     """Batch processor for streaming dataset creation."""
     
     def __init__(self, config: Dict, epitopes_positions: List[int], window_size: int):
-        memory_config = config.get('memory_optimization', {})
+        memory_config = config.get('optimization', {}).get('memory', {})
         batch_size = memory_config.get('dataset_creation_batch_size', 100)
         super().__init__(config, batch_size, "BatchDatasetProcessor")
         
@@ -671,7 +672,27 @@ class DatasetCreationPipeline:
         self.periods_unique_dir = self.data_config['periods_unique_dir']
         self.prot_vec_file = self.data_config['prot_vec_file']
         self.final_dataset_file = self.data_config['final_dataset_file']
-        
+
+        # Validate required input files and directories exist
+        logging.info("Validating required input files for dataset creation...")
+        validate_file_exists(
+            self.prot_vec_file,
+            "ProtVec embeddings file (100d 3-grams)",
+            raise_error=True
+        )
+        validate_file_exists(
+            self.linked_centroids_file,
+            "Linked cluster centroids file (output from cluster step)",
+            raise_error=True
+        )
+        validate_directory_exists(
+            self.periods_unique_dir,
+            "Unique periods directory (output from prepare step)",
+            raise_error=True,
+            create_if_missing=False
+        )
+        logging.info("✓ All required input files validated")
+
         # Parallelization configuration
         self.parallel_config = self.dataset_config.get('parallel', {})
         self.parallel_windows = self.parallel_config.get('enabled', True)
@@ -1202,7 +1223,7 @@ class DatasetCreationPipeline:
         logging.info("Processing sequence samples into dataset format...")
         
         # Check if streaming is enabled
-        memory_config = self.config.get('memory_optimization', {})
+        memory_config = self.config.get('optimization', {}).get('memory', {})
         use_streaming = memory_config.get('use_streaming', True)
         
         if use_streaming and len(sequence_samples) > self.batch_dataset_processor.batch_size:
@@ -1465,7 +1486,7 @@ class DatasetCreationPipeline:
         logging.info(f"Starting duplicate removal on {len(df)} rows...")
         
         # Check if streaming duplicate removal should be used
-        memory_config = self.config.get('memory_optimization', {})
+        memory_config = self.config.get('optimization', {}).get('memory', {})
         use_streaming = memory_config.get('use_streaming', True)
         batch_size = memory_config.get('dataset_creation_batch_size', 100)
         
@@ -1490,7 +1511,7 @@ class DatasetCreationPipeline:
         
         try:
             # Process in chunks
-            memory_config = self.config.get('memory_optimization', {})
+            memory_config = self.config.get('optimization', {}).get('memory', {})
             chunk_size = memory_config.get('dataset_creation_batch_size', 100)
             
             with open(temp_file, 'w') as outfile:

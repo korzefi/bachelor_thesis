@@ -4,30 +4,26 @@ protein_name: "SARS-CoV-2 Spike"
 
 # --- OPTIMIZATION SETTINGS ---
 optimization:
-  enabled: true
-
   memory:
-    use_streaming: true
-    use_memory_mapping: false  # Enable if RAM < 4GB
+    # Memory limits
     max_memory_mb: 4096
-    gc_frequency: 100
-    gc_aggressive: true
+    gc_frequency: 100  # Garbage collection every N batches
+    # I/O optimization
+    use_streaming: true
+    intermediate_saves: true
+    # Batch sizes for different operations
+    data_preparation_batch_size: 5000  # Increased from 1000
+    clustering_batch_size: 1000  # Increased from 500
+    dataset_creation_batch_size: 500  # Increased from 100
+    protvec_batch_size: 50
 
   performance:
     use_multiprocessing: true
-    n_workers: auto  # Will use cpu_count()
-    use_vectorization: true
+    # n_workers determined automatically using cpu_count()
     cache_enabled: true
-    cache_size: 10000
-
-  io:
-    file_format: parquet  # csv or parquet
-    compression: snappy
-    batch_size: 10000
 
   algorithms:
     use_approximate_nn: false  # Set true for very large datasets
-    early_stopping_threshold: 0.95
 
 # --- ERROR HANDLING ---
 error_handling:
@@ -52,22 +48,6 @@ error_handling:
   enable_checkpoints: true
   checkpoint_file: "data/processed/pipeline_progress.json"
 
-# --- MEMORY OPTIMIZATION (LEGACY) ---
-memory_optimization:
-  # Batch sizes for different operations
-  data_preparation_batch_size: 5000  # Increased from 1000
-  clustering_batch_size: 1000  # Increased from 500
-  dataset_creation_batch_size: 500  # Increased from 100
-  protvec_batch_size: 50
-
-  # Memory limits
-  max_memory_mb: 4096
-  gc_frequency: 100  # Garbage collection every N batches
-
-  # I/O optimization
-  use_streaming: true
-  intermediate_saves: true
-  compression: false
 
 # --- PATHS ---
 data:
@@ -101,8 +81,8 @@ results:
 prepare:
   split_fasta:
     start_line: 1  # Start line for processing (allows resuming from specific position)
-    lines_per_file: 100000
-    max_files: 10000
+    lines_per_file: 10000
+    max_files: 10
   # Configurable FASTA filename prefix (replaces hardcoded 'spikeprot_batch_data')
   fasta_prefix: "spikeprot_batch_data"
   clean_sequences:
@@ -167,7 +147,7 @@ create_dataset:
   ]
   epitopes_similarity_threshold: 0.5
   # Total desired samples in the final dataset.
-  dataset_size: 1268000 # 317 positions * 400 samples
+  dataset_size: 126 # 317 positions * 400 samples
   # Duplication factor to compensate for high duplicate removal rates
   duplication_factor: 5
   # For refilling dataset to meet ratio
@@ -175,7 +155,7 @@ create_dataset:
     enabled: true
     max_iterations: 200
     target_mutated_ratio: 0.2
-    early_stopping_threshold: 0.95
+    early_stopping_threshold: 0.95  # Moved from optimization.algorithms
 
   # Parallel processing configuration
   parallel:

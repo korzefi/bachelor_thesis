@@ -27,6 +27,7 @@ from datetime import datetime
 
 import scripts.utils as utils
 from scripts.utils import BatchProcessor, DataFrameChunker
+from scripts.validation import validate_file_exists
 
 
 class DataPreparationPipeline:
@@ -39,11 +40,20 @@ class DataPreparationPipeline:
         self.prepare_config = config['prepare']
         self.error_config = config.get('error_handling', {})
 
+        # Validate required input files exist
+        logging.info("Validating required input files for data preparation...")
+        validate_file_exists(
+            self.data_config['raw_fasta_file'],
+            "Raw FASTA file (protein sequences)",
+            raise_error=True
+        )
+        logging.info("✓ All required input files validated")
+
         # Create directory structure
         self._create_directories()
 
         # Initialize memory monitoring
-        memory_config = config.get('memory_optimization', {})
+        memory_config = config.get('optimization', {}).get('memory', {})
         self.batch_size = memory_config.get('data_preparation_batch_size', 1000)
         self.memory_monitor = utils.MemoryMonitor(
             memory_config.get('max_memory_mb'),
@@ -338,7 +348,7 @@ class DataPreparationPipeline:
             logging.info(f"Auto-detected expected length: {expected_len} (range: {min_len}-{max_len})")
         
         # Check if streaming should be used
-        memory_config = self.config.get('memory_optimization', {})
+        memory_config = self.config.get('optimization', {}).get('memory', {})
         use_streaming = memory_config.get('use_streaming', True)
         
         for i, csv_file in enumerate(csv_files, 1):

@@ -27,6 +27,7 @@ import json
 
 import scripts.utils as utils
 from scripts.utils import BatchProcessor, DataFrameChunker
+from scripts.validation import validate_file_exists, validate_directory_exists
 
 
 def _transform_single_file_worker(args):
@@ -151,7 +152,7 @@ class BatchVectorProcessor(BatchProcessor):
     """Batch processor for converting sequences to vectors."""
     
     def __init__(self, config: Dict, prot_vec_df: pd.DataFrame):
-        memory_config = config.get('memory_optimization', {})
+        memory_config = config.get('optimization', {}).get('memory', {})
         batch_size = memory_config.get('clustering_batch_size', 500)
         super().__init__(config, batch_size, "BatchVectorProcessor")
 
@@ -266,16 +267,31 @@ class ClusteringPipeline:
         self.config = config
         self.data_config = config['data']
         self.cluster_config = config['cluster']
-        
+
         # Setup paths
         self.periods_unique_dir = self.data_config['periods_unique_dir']
         self.vector_temp_dir = self.data_config['vector_temp_dir']
         self.prot_vec_path = self.data_config['prot_vec_file']
         self.centroids_file = self.data_config['centroids_file']
-        
+
+        # Validate required input files and directories exist
+        logging.info("Validating required input files for clustering...")
+        validate_file_exists(
+            self.prot_vec_path,
+            "ProtVec embeddings file (100d 3-grams)",
+            raise_error=True
+        )
+        validate_directory_exists(
+            self.periods_unique_dir,
+            "Unique periods directory (output from prepare step)",
+            raise_error=True,
+            create_if_missing=False
+        )
+        logging.info("✓ All required input files validated")
+
         # Create directories
         self._create_directories()
-        
+
         # Load ProtVec embeddings
         self.prot_vec_df = self._load_prot_vec_embeddings()
         
@@ -377,8 +393,80 @@ class ClusteringPipeline:
 
         return centroids
 
+    def _validate_source_period_files(self, period_files: List[str]) -> List[str]:
+        """
+        Validate source period files (before transformation) and return list of valid files.
+
+        Checks that source CSV files in periods_unique_dir are:
+        - Readable and accessible
+        - Non-empty
+        - Have correct structure (columns: isolate_name, timestamp, sequence)
+        """
+        valid_files = []
+        invalid_files = []
+
+        for period_file in period_files:
+            source_path = f"{self.periods_unique_dir}/{period_file}"
+
+            try:
+                # Check if file exists
+                if not os.path.exists(source_path):
+                    invalid_files.append((period_file, "Source file does not exist"))
+                    continue
+
+                # Check file size
+                file_size = os.path.getsize(source_path)
+                if file_size == 0:
+                    invalid_files.append((period_file, "Empty file"))
+                    continue
+
+                # Validate file structure by reading header and first row
+                try:
+                    sample_df = pd.read_csv(source_path, nrows=5)
+
+                    # Check for required columns
+                    required_columns = ['isolate_name', 'timestamp', 'sequence']
+                    missing_columns = [col for col in required_columns if col not in sample_df.columns]
+
+                    if missing_columns:
+                        invalid_files.append((period_file, f"Missing columns: {missing_columns}"))
+                        continue
+
+                    # Check if file has any sequences
+                    if len(sample_df) == 0:
+                        invalid_files.append((period_file, "No sequences in file"))
+                        continue
+
+                    # File is valid
+                    valid_files.append(period_file)
+                    logging.debug(f"✓ Valid source file: {period_file}")
+
+                except pd.errors.EmptyDataError:
+                    invalid_files.append((period_file, "Empty or corrupted CSV"))
+                except Exception as e:
+                    invalid_files.append((period_file, f"Read error: {e}"))
+
+            except Exception as e:
+                invalid_files.append((period_file, f"Validation error: {e}"))
+
+        # Log validation results
+        if invalid_files:
+            logging.warning(f"Found {len(invalid_files)} invalid source period files:")
+            for file, reason in invalid_files[:10]:  # Show first 10
+                logging.warning(f"  {file}: {reason}")
+            if len(invalid_files) > 10:
+                logging.warning(f"  ... and {len(invalid_files) - 10} more")
+
+        logging.info(f"Validated {len(valid_files)} valid source files out of {len(period_files)} total")
+        return valid_files
+
     def _validate_vector_files(self, period_files: List[str]) -> List[str]:
-        """Validate vector files and return list of valid files."""
+        """
+        Validate vector files (after transformation) and return list of valid files.
+
+        This is used as a post-transformation sanity check to ensure
+        vector files were created correctly.
+        """
         valid_files = []
         invalid_files = []
 
@@ -420,9 +508,11 @@ class ClusteringPipeline:
 
         # Log validation results
         if invalid_files:
-            logging.warning(f"Found {len(invalid_files)} invalid vector files:")
-            for file, reason in invalid_files:
+            logging.warning(f"Found {len(invalid_files)} invalid/missing vector files:")
+            for file, reason in invalid_files[:10]:  # Show first 10
                 logging.warning(f"  {file}: {reason}")
+            if len(invalid_files) > 10:
+                logging.warning(f"  ... and {len(invalid_files) - 10} more")
 
         logging.info(f"Validated {len(valid_files)} valid vector files out of {len(period_files)} total")
         return valid_files
@@ -473,32 +563,35 @@ class ClusteringPipeline:
         initial_memory = self._format_memory_usage()
 
         try:
-            # Step 1: Get period files to process
-            logging.info("📁 PHASE 1: Discovering and validating period files...")
+            # Step 1: Get and validate source period files
+            logging.info("📁 PHASE 1: Discovering and validating source period files...")
+            logging.info(f"   Source directory: {self.periods_unique_dir}")
             phase1_start = time.time()
 
             period_files = self._get_period_files()
-            logging.info(f"Found {len(period_files)} period files")
+            logging.info(f"   Found {len(period_files)} period files to process")
 
-            # Validate vector files before processing
-            valid_period_files = self._validate_vector_files(period_files)
+            # Validate SOURCE files (not vector files - those don't exist yet!)
+            valid_period_files = self._validate_source_period_files(period_files)
 
             # Clean up corrupted centroids file if needed
             self._cleanup_corrupted_centroids_file()
 
             phase1_elapsed = time.time() - phase1_start
-            logging.info(f"✅ Validated {len(valid_period_files)} files in {self._format_time(phase1_elapsed)}")
+            logging.info(f"✅ Phase 1 complete: {len(valid_period_files)}/{len(period_files)} valid source files in {self._format_time(phase1_elapsed)}")
 
             if not valid_period_files:
-                logging.warning("⚠️  No valid period files found to process!")
+                logging.error("❌ No valid source period files found to process!")
+                logging.error(f"   Please ensure period files exist in: {self.periods_unique_dir}")
                 return
 
             # Use validated files for processing
             period_files = valid_period_files
 
-            # TODO: if data is already embedded, don't transform it
             # Step 2: Transform sequences to vectors
-            logging.info("\n🔄 PHASE 2: Vector transformation...")
+            logging.info("\n🔄 PHASE 2: Transforming sequences to vectors...")
+            logging.info(f"   Processing {len(period_files)} files")
+            logging.info(f"   Output directory: {self.vector_temp_dir}")
             phase2_start = time.time()
 
             if self.cluster_config['use_multiprocessing']:
@@ -507,10 +600,28 @@ class ClusteringPipeline:
                 self._transform_sequences_to_vectors_sequential(period_files)
 
             phase2_elapsed = time.time() - phase2_start
-            logging.info(f"✅ Vector transformation completed in {self._format_time(phase2_elapsed)}")
+            logging.info(f"✅ Phase 2 complete: Vector transformation finished in {self._format_time(phase2_elapsed)}")
+
+            # Post-transformation validation (sanity check)
+            logging.info("   Validating created vector files...")
+            valid_vector_files = self._validate_vector_files(period_files)
+            if len(valid_vector_files) < len(period_files):
+                missing_count = len(period_files) - len(valid_vector_files)
+                logging.warning(f"   ⚠️  {missing_count} vector files failed validation")
+            else:
+                logging.info(f"   ✓ All {len(valid_vector_files)} vector files validated successfully")
+
+            # Use only successfully created vector files for clustering
+            period_files = valid_vector_files
+
+            if not period_files:
+                logging.error("❌ No valid vector files after transformation!")
+                logging.error("   Vector transformation may have failed. Check logs above.")
+                return
 
             # Step 3: Create clusters for each period
-            logging.info("\n🎯 PHASE 3: Clustering...")
+            logging.info("\n🎯 PHASE 3: Clustering vectors...")
+            logging.info(f"   Clustering {len(period_files)} period files")
             phase3_start = time.time()
 
             self._create_clusters_for_periods()
@@ -646,7 +757,7 @@ class ClusteringPipeline:
                        f"({len(prot_vec_dict)} triplets)")
 
             # Prepare arguments for worker processes
-            memory_config = self.config.get('memory_optimization', {})
+            memory_config = self.config.get('optimization', {}).get('memory', {})
             worker_args = [
                 (period_file, self.periods_unique_dir, self.vector_temp_dir,
                  prot_vec_dict, memory_config)
@@ -711,7 +822,7 @@ class ClusteringPipeline:
         output_path = f"{self.vector_temp_dir}/{period_file}"
         
         # Check if streaming is enabled
-        memory_config = self.config.get('memory_optimization', {})
+        memory_config = self.config.get('optimization', {}).get('memory', {})
         use_streaming = memory_config.get('use_streaming', True)
         
         if use_streaming:
@@ -1236,7 +1347,7 @@ class ClusteringPipeline:
         n_samples = len(vectors_array)
         
         # Get memory optimization settings
-        memory_config = self.config.get('memory_optimization', {})
+        memory_config = self.config.get('optimization', {}).get('memory', {})
         clustering_batch_size = memory_config.get('clustering_batch_size', 500)
         
         # Choose clustering algorithm based on data size
