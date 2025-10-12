@@ -146,10 +146,13 @@ create_dataset:
     [897, 913], [1101, 1115], [1129, 1145], [1213, 1229]
   ]
   epitopes_similarity_threshold: 0.5
-  # Total desired samples in the final dataset.
-  dataset_size: 126 # 317 positions * 400 samples
+  # Target number of rows in the FINAL dataset (after deduplication)
+  dataset_size: 126800 # Target rows after removing duplicates
   # Duplication factor to compensate for high duplicate removal rates
   duplication_factor: 5
+  # Expected duplicate rate (0.8 = 80% duplicates expected)
+  # Used to better estimate initial overproduction needed
+  expected_duplicate_rate: 0.8
   # For refilling dataset to meet ratio
   refiller:
     enabled: true

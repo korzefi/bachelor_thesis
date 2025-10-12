@@ -659,13 +659,22 @@ class DatasetCreationPipeline:
         self.context_size = self.dataset_config['context_size']
         self.epitopes_similarity_threshold = self.dataset_config['epitopes_similarity_threshold']
         self.dataset_size = self.dataset_config['dataset_size']
-        
+
         # Duplication factor to compensate for duplicate removal
         self.duplication_factor = self.dataset_config.get('duplication_factor', 20)
-        
+
         # Parse epitope positions
         self.epitopes_positions = self._parse_epitope_positions(self.dataset_config['epitopes'])
         self.max_similar_epitopes = int(len(self.epitopes_positions) * self.epitopes_similarity_threshold)
+
+        # Validate dataset_size for small values
+        min_dataset_size = len(self.epitopes_positions)
+        if self.dataset_size < min_dataset_size:
+            logging.warning(f"dataset_size ({self.dataset_size}) is smaller than epitope positions ({min_dataset_size}). "
+                          f"This targets {self.dataset_size} rows in the FINAL dataset after deduplication.")
+            logging.warning(f"Consider setting dataset_size to at least {min_dataset_size} for a minimal final dataset, "
+                          f"or {min_dataset_size * 10} for a small but functional dataset.")
+            logging.info(f"Note: dataset_size controls the FINAL size after duplicate removal, not the initial generation.")
         
         # File paths
         self.linked_centroids_file = self.data_config['linked_centroids_file']
@@ -784,18 +793,40 @@ class DatasetCreationPipeline:
     
     def _run_single_pass(self) -> None:
         """Run dataset creation without refilling."""
+        # Get expected duplicate rate for better estimation
+        expected_dup_rate = self.dataset_config.get('expected_duplicate_rate', 0.8)
+
+        # Log the target
+        logging.info(f"=== SINGLE PASS MODE ===")
+        logging.info(f"Target final dataset size (after dedup): {self.dataset_size} rows")
+        logging.info(f"Expected duplicate rate: {expected_dup_rate:.1%}")
+
         dataset_df = self._create_dataset()
         dataset_df, duplicate_rate = self._remove_duplicates(dataset_df)
-        self._save_dataset(dataset_df)
-        
-        # Log statistics
+
+        # Check if we reached target
         total_samples = len(dataset_df)
+        target_reached_percent = (total_samples / self.dataset_size * 100) if self.dataset_size > 0 else 0
+
+        if total_samples < self.dataset_size * 0.95:
+            logging.warning(f"Dataset size ({total_samples}) is below 95% of target ({self.dataset_size})")
+            logging.warning(f"Only achieved {target_reached_percent:.1f}% of target size")
+            logging.warning(f"Actual duplicate rate ({duplicate_rate:.1%}) vs expected ({expected_dup_rate:.1%})")
+            logging.warning(f"Consider enabling refiller or adjusting duplication_factor/expected_duplicate_rate")
+        else:
+            logging.info(f"Successfully reached {target_reached_percent:.1f}% of target size")
+
+        self._save_dataset(dataset_df)
+
+        # Log final statistics
         mutated_samples = len(dataset_df[dataset_df['y'] == 1])
         mutation_ratio = mutated_samples / total_samples if total_samples > 0 else 0
-        
-        logging.info(f"Created dataset with {total_samples} samples")
+
+        logging.info(f"=== FINAL DATASET STATISTICS ===")
+        logging.info(f"Target size: {self.dataset_size} rows")
+        logging.info(f"Actual size: {total_samples} rows ({target_reached_percent:.1f}% of target)")
         logging.info(f"Mutation ratio: {mutation_ratio:.3f} ({mutated_samples}/{total_samples})")
-        logging.info(f"Final duplicate rate: {duplicate_rate:.1%}")
+        logging.info(f"Duplicate rate: {duplicate_rate:.1%}")
 
         # Clear checkpoint after successful completion
         if self.checkpoint_manager:
@@ -807,8 +838,13 @@ class DatasetCreationPipeline:
         max_iterations = refiller_config.get('max_iterations', 20)
         target_ratio = refiller_config.get('target_mutated_ratio', 0.2)
         early_stopping_threshold = refiller_config.get('early_stopping_threshold', 0.95)
+        expected_dup_rate = self.dataset_config.get('expected_duplicate_rate', 0.8)
 
-        logging.info(f"Running with refilling (target ratio: {target_ratio})")
+        logging.info(f"=== REFILLING MODE ===")
+        logging.info(f"Target FINAL dataset size (after dedup): {self.dataset_size} rows")
+        logging.info(f"Target mutation ratio: {target_ratio:.1%}")
+        logging.info(f"Early stopping threshold: {early_stopping_threshold:.1%} of target")
+        logging.info(f"Expected duplicate rate: {expected_dup_rate:.1%}")
 
         dataset_df = self._create_dataset()
         dataset_df, initial_duplicate_rate = self._remove_duplicates(dataset_df)
@@ -822,11 +858,14 @@ class DatasetCreationPipeline:
             mutated_samples = len(dataset_df[dataset_df['y'] == 1])
             current_ratio = mutated_samples / total_samples if total_samples > 0 else 0
 
-            logging.info(f"Iteration {iteration}: {total_samples} samples, ratio: {current_ratio:.3f}")
+            # Calculate progress toward target
+            target_progress = (total_samples / self.dataset_size * 100) if self.dataset_size > 0 else 0
+            logging.info(f"Iteration {iteration}: {total_samples}/{self.dataset_size} rows ({target_progress:.1f}% of target)")
+            logging.info(f"  Mutation ratio: {current_ratio:.3f}, Target: {target_ratio:.3f}")
 
             # Early stopping conditions
             if total_samples >= self.dataset_size * early_stopping_threshold:
-                logging.info(f"Early stopping: {early_stopping_threshold*100}% of target reached")
+                logging.info(f"Early stopping: Reached {early_stopping_threshold*100:.0f}% of target size")
                 break
 
             # Check for improvement
@@ -834,6 +873,7 @@ class DatasetCreationPipeline:
                 no_improvement_count += 1
                 if no_improvement_count >= 3:
                     logging.info("Early stopping: No improvement for 3 iterations")
+                    logging.info(f"  Current: {total_samples} rows, Best: {best_size} rows")
                     break
             else:
                 best_size = total_samples
@@ -841,7 +881,7 @@ class DatasetCreationPipeline:
 
             # Check if target dataset size is achieved
             if total_samples >= self.dataset_size:
-                logging.info(f"Target dataset size {self.dataset_size} achieved!")
+                logging.info(f"✓ Target dataset size {self.dataset_size} achieved! (Actual: {total_samples})")
                 break
 
             # Calculate how many more samples we need
@@ -854,7 +894,10 @@ class DatasetCreationPipeline:
                     logging.info(f"High duplicate rate ({avg_duplicate_rate:.1%}), increasing duplication factor to {self.duplication_factor}")
 
                 # Create additional samples
+                # Set current_dataset_size to the number of additional rows needed
+                # This will be properly converted to sequence samples in _create_sequence_samples
                 self.current_dataset_size = needed_samples
+                logging.info(f"Creating additional samples to reach target: need {needed_samples} more rows")
                 additional_df = self._create_dataset()
 
                 # Combine datasets and remove duplicates
@@ -870,11 +913,19 @@ class DatasetCreationPipeline:
         mutated_samples = len(dataset_df[dataset_df['y'] == 1])
         final_ratio = mutated_samples / total_samples if total_samples > 0 else 0
         avg_duplicate_rate = sum(duplicate_rates) / len(duplicate_rates) if duplicate_rates else 0
-        
-        logging.info(f"Final dataset: {total_samples} samples, "
-                    f"mutation ratio: {final_ratio:.3f} ({mutated_samples}/{total_samples})")
+        target_achieved_percent = (total_samples / self.dataset_size * 100) if self.dataset_size > 0 else 0
+
+        logging.info(f"=== FINAL DATASET STATISTICS (REFILLING MODE) ===")
+        logging.info(f"Target size: {self.dataset_size} rows (after deduplication)")
+        logging.info(f"Actual size: {total_samples} rows ({target_achieved_percent:.1f}% of target)")
+        logging.info(f"Mutation ratio: {final_ratio:.3f} ({mutated_samples}/{total_samples})")
         logging.info(f"Average duplicate rate: {avg_duplicate_rate:.1%}")
         logging.info(f"Final duplication factor: {self.duplication_factor}")
+
+        if total_samples >= self.dataset_size * 0.95:
+            logging.info(f"✓ Successfully achieved target dataset size!")
+        else:
+            logging.warning(f"⚠ Only achieved {target_achieved_percent:.1f}% of target size")
 
         # Clear checkpoint after successful completion
         if self.checkpoint_manager:
@@ -938,17 +989,53 @@ class DatasetCreationPipeline:
         epitopes_pos_num = len(set(self.epitopes_positions))
         total_dataset_size = getattr(self, 'current_dataset_size', self.dataset_size)
 
-        base_sequence_samples_needed = total_dataset_size // epitopes_pos_num
-        total_sequence_samples_needed = int(base_sequence_samples_needed * self.duplication_factor)
-        samples_per_window = max(1, total_sequence_samples_needed // len(windows))
+        # dataset_size is the target AFTER deduplication
+        # We need to overproduce to account for duplicates that will be removed
+        target_final_rows = total_dataset_size  # This is our target after dedup
+        target_sequence_samples = target_final_rows // epitopes_pos_num
 
-        logging.info(f"=== PARALLEL SEQUENCE SAMPLE CREATION ===")
+        # Get expected duplicate rate for better initial estimation
+        expected_dup_rate = self.dataset_config.get('expected_duplicate_rate', 0.8)
+
+        # Calculate effective duplication factor based on expected duplicate rate
+        if expected_dup_rate > 0 and expected_dup_rate < 1:
+            # If we expect 80% duplicates, we need 5x samples (1 / 0.2 = 5)
+            effective_duplication_factor = max(self.duplication_factor, 1 / (1 - expected_dup_rate))
+        else:
+            effective_duplication_factor = self.duplication_factor
+
+        # Always apply duplication factor to reach target after dedup
+        total_sequence_samples_needed = int(target_sequence_samples * effective_duplication_factor)
+
+        # For very small datasets, ensure reasonable minimum overproduction
+        if target_sequence_samples == 0 and target_final_rows > 0:
+            # Special case: dataset_size is positive but smaller than epitope count
+            # Create at least 1 sample per window to generate some data
+            total_sequence_samples_needed = max(1, len(windows))
+            logging.info(f"Very small dataset requested ({target_final_rows} rows), creating minimal samples")
+        elif target_sequence_samples < 10 and total_sequence_samples_needed < target_sequence_samples * 5:
+            total_sequence_samples_needed = min(target_sequence_samples * 10, 100)
+
+        # Calculate samples per window
+        samples_per_window = total_sequence_samples_needed // len(windows) if len(windows) > 0 else 0
+
+        logging.info(f"=== SEQUENCE SAMPLE CREATION (Target: {total_dataset_size} final rows after dedup) ===")
         logging.info(f"Unique epitope positions: {epitopes_pos_num}")
-        logging.info(f"Target dataset size: {total_dataset_size}")
-        logging.info(f"Duplication factor: {self.duplication_factor}")
-        logging.info(f"Total samples needed: {total_sequence_samples_needed}")
+        logging.info(f"Target FINAL dataset size (after dedup): {target_final_rows} rows")
+        logging.info(f"Target sequence samples (final): {target_sequence_samples}")
+        logging.info(f"Expected duplicate rate: {expected_dup_rate:.1%}")
+        logging.info(f"Effective duplication factor: {effective_duplication_factor:.1f}")
+        logging.info(f"Total samples to create (with overproduction): {total_sequence_samples_needed}")
         logging.info(f"Samples per window: {samples_per_window}")
         logging.info(f"Windows to process: {len(windows)}")
+        logging.info(f"Expected rows before dedup: {total_sequence_samples_needed * epitopes_pos_num}")
+        logging.info(f"Expected rows after dedup (estimate): {int(total_sequence_samples_needed * epitopes_pos_num * (1 - expected_dup_rate))}")
+
+        # Early exit for very small datasets
+        if samples_per_window == 0:
+            logging.warning(f"Calculated 0 samples per window. Dataset size ({total_dataset_size}) too small for {len(windows)} windows.")
+            logging.warning(f"Minimum dataset size for {len(windows)} windows with {epitopes_pos_num} epitope positions: {len(windows) * epitopes_pos_num}")
+            return []  # Return empty list for no processing
 
         if self.parallel_windows and self.cache_enabled:
             return self._create_sequence_samples_parallel(
@@ -1221,7 +1308,13 @@ class DatasetCreationPipeline:
     def _process_samples_to_dataset(self, sequence_samples: List[List[str]]) -> pd.DataFrame:
         """Process sequence samples into final dataset format using streaming."""
         logging.info("Processing sequence samples into dataset format...")
-        
+
+        # Handle empty sequence samples (for very small datasets)
+        if not sequence_samples:
+            logging.warning("No sequence samples to process. Returning empty dataset.")
+            columns = ['y'] + [str(i) for i in range(self.window_size)]
+            return pd.DataFrame(columns=columns)
+
         # Check if streaming is enabled
         memory_config = self.config.get('optimization', {}).get('memory', {})
         use_streaming = memory_config.get('use_streaming', True)
