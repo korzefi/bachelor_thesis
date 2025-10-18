@@ -34,42 +34,88 @@ from scripts.validation import validate_file_exists, validate_directory_exists
 
 class BatchDatasetProcessor(BatchProcessor):
     """Batch processor for streaming dataset creation."""
-    
+
     def __init__(self, config: Dict, epitopes_positions: List[int], window_size: int):
         memory_config = config.get('optimization', {}).get('memory', {})
         batch_size = memory_config.get('dataset_creation_batch_size', 100)
         super().__init__(config, batch_size, "BatchDatasetProcessor")
-        
+
         self.epitopes_positions = epitopes_positions
         self.window_size = window_size
-        self.temp_dir = None
         self.output_file = None
-        
+        self.window_metadata = None  # Store metadata for period tracking
+
         # ProtVec batch size for transformation
         self.protvec_batch_size = memory_config.get('protvec_batch_size', 50)
     
     def setup_output_file(self, output_path: str):
         """Setup output file for streaming results."""
         self.output_file = output_path
-        self.temp_dir = f"{output_path}_temp"
-        utils.create_dir(self.temp_dir)
-        
+
         # Remove existing output file if it exists
         if os.path.exists(output_path):
             os.remove(output_path)
-    
-    def process_batch(self, batch_samples: List[List[str]]) -> pd.DataFrame:
-        """Process a batch of sequence samples into dataset format."""
+
+    def set_metadata(self, window_metadata: List[Dict]):
+        """Set the metadata for period tracking."""
+        self.window_metadata = window_metadata
+
+    def process_in_batches(self, data_source: Any, description: str = "Processing") -> list:
+        """Override to handle metadata alignment with batches."""
+        logging.info(f"{self.component_name}: Starting {description} with batch size {self.batch_size}")
+
+        batch_count = 0
+
+        try:
+            for batch_index, batch_data in enumerate(self.create_data_iterator(data_source)):
+                # Log progress
+                if batch_index % 10 == 0:
+                    memory_mb = self.memory_monitor.get_memory_usage_mb()
+                    logging.info(f"{self.component_name}: Processing batch {batch_index + 1}, Memory: {memory_mb:.1f}MB")
+
+                # Extract metadata for this batch (if available)
+                batch_start_idx = batch_index * self.batch_size
+                batch_end_idx = batch_start_idx + len(batch_data)
+                if self.window_metadata and batch_start_idx < len(self.window_metadata):
+                    batch_metadata = self.window_metadata[batch_start_idx:batch_end_idx]
+                else:
+                    batch_metadata = None
+
+                # Process batch with metadata
+                batch_result = self.process_batch_with_metadata(batch_data, batch_metadata)
+
+                # Save result
+                if self.intermediate_saves:
+                    self.save_batch_result(batch_result, batch_index)
+
+                # Memory monitoring
+                self.memory_monitor.batch_completed()
+                batch_count += 1
+
+        except Exception as e:
+            logging.error(f"{self.component_name}: Batch processing failed at batch {batch_count}: {e}")
+            raise
+
+        logging.info(f"{self.component_name}: Completed {description}, processed {batch_count} batches")
+        return []
+
+    def process_batch_with_metadata(self, batch_samples: List[List[str]],
+                                   batch_metadata: List[Dict] = None) -> pd.DataFrame:
+        """Process a batch of sequence samples with metadata into dataset format."""
         # Extract epitopes with context from batch
         epitope_samples = self._extract_epitopes_with_context_batch(batch_samples)
-        
+
         # Transform to ProtVec indices in sub-batches
         protvec_samples = self._transform_to_protvec_indices_batch(epitope_samples)
-        
-        # Create final dataframe from batch
-        dataset_df = self._create_dataframe_from_batch(protvec_samples)
-        
+
+        # Create final dataframe from batch with metadata
+        dataset_df = self._create_dataframe_from_batch(protvec_samples, batch_metadata)
+
         return dataset_df
+
+    def process_batch(self, batch_samples: List[List[str]]) -> pd.DataFrame:
+        """Process a batch of sequence samples into dataset format (backward compatibility)."""
+        return self.process_batch_with_metadata(batch_samples, None)
     
     def save_batch_result(self, dataset_df: pd.DataFrame, batch_index: int) -> None:
         """Save batch result incrementally to final output file."""
@@ -128,34 +174,45 @@ class BatchDatasetProcessor(BatchProcessor):
         
         return protvec_samples
     
-    def _create_dataframe_from_batch(self, protvec_samples: List[List[List[List[int]]]]) -> pd.DataFrame:
-        """Create DataFrame from batch of ProtVec samples."""
+    def _create_dataframe_from_batch(self, protvec_samples: List[List[List[List[int]]]],
+                                    batch_metadata: List[Dict] = None) -> pd.DataFrame:
+        """Create DataFrame from batch of ProtVec samples with metadata."""
         if not protvec_samples:
-            columns = ['y'] + [str(i) for i in range(self.window_size)]
+            columns = ['y'] + [str(i) for i in range(self.window_size)] + ['period_start', 'period_end']
             return pd.DataFrame(columns=columns)
-        
+
         # Pre-allocate list for rows
         all_rows = []
-        
-        for sample in protvec_samples:
+
+        for sample_idx, sample in enumerate(protvec_samples):
             epitopes_count = len(sample[0])  # Number of epitope positions
-            
+
+            # Get metadata for this sample if available
+            if batch_metadata and sample_idx < len(batch_metadata):
+                period_info = batch_metadata[sample_idx]
+                period_start = period_info.get('period_start', '')
+                period_end = period_info.get('period_end', '')
+            else:
+                period_start = ''
+                period_end = ''
+
             for epitope_idx in range(epitopes_count):
                 row_data = []
-                
+
                 # Collect data for this epitope position across all sequences in the sample
                 for sequence_idx in range(len(sample)):
                     if epitope_idx < len(sample[sequence_idx]):
                         row_data.append(sample[sequence_idx][epitope_idx])
                     else:
                         row_data.append([])  # Empty if epitope not available
-                
-                # Create row for dataset
+
+                # Create row for dataset with metadata
                 dataset_row = self._create_dataset_row(row_data)
+                dataset_row.extend([period_start, period_end])
                 all_rows.append(dataset_row)
-        
-        # Create DataFrame from all rows
-        columns = ['y'] + [str(i) for i in range(self.window_size)]
+
+        # Create DataFrame from all rows with period columns
+        columns = ['y'] + [str(i) for i in range(self.window_size)] + ['period_start', 'period_end']
         return pd.DataFrame(all_rows, columns=columns)
     
     def _create_triplets_from_epitope(self, epitope_context: str) -> List[str]:
@@ -932,19 +989,19 @@ class DatasetCreationPipeline:
             self.checkpoint_manager.clear_checkpoint()
     
     def _create_dataset(self) -> pd.DataFrame:
-        """Create the main dataset."""
+        """Create the main dataset with period tracking."""
         # Load linked centroids
         centroids_df = self._load_linked_centroids()
-        
+
         # Create sliding windows
         windows = self._create_sliding_windows(centroids_df)
-        
-        # Create sequence samples
-        sequence_samples = self._create_sequence_samples(centroids_df, windows)
-        
-        # Process samples into final dataset format
-        dataset_df = self._process_samples_to_dataset(sequence_samples)
-        
+
+        # Create sequence samples with metadata
+        sequence_samples, window_metadata = self._create_sequence_samples(centroids_df, windows)
+
+        # Process samples into final dataset format with period tracking
+        dataset_df = self._process_samples_to_dataset(sequence_samples, window_metadata)
+
         return dataset_df
     
     def _load_linked_centroids(self) -> pd.DataFrame:
@@ -983,8 +1040,8 @@ class DatasetCreationPipeline:
         logging.info(f"Created {len(windows)} sliding windows")
         return windows
     
-    def _create_sequence_samples(self, centroids_df: pd.DataFrame, windows: List[Dict]) -> List[List[str]]:
-        """Create sequence samples using parallel processing and checkpointing."""
+    def _create_sequence_samples(self, centroids_df: pd.DataFrame, windows: List[Dict]) -> Tuple[List[List[str]], List[Dict]]:
+        """Create sequence samples using parallel processing and checkpointing, with period tracking."""
         # Calculate number of sequence samples needed
         epitopes_pos_num = len(set(self.epitopes_positions))
         total_dataset_size = getattr(self, 'current_dataset_size', self.dataset_size)
@@ -1035,21 +1092,26 @@ class DatasetCreationPipeline:
         if samples_per_window == 0:
             logging.warning(f"Calculated 0 samples per window. Dataset size ({total_dataset_size}) too small for {len(windows)} windows.")
             logging.warning(f"Minimum dataset size for {len(windows)} windows with {epitopes_pos_num} epitope positions: {len(windows) * epitopes_pos_num}")
-            return []  # Return empty list for no processing
+            return [], []  # Return empty lists for no processing
+
+        # Create window metadata for period tracking
+        window_metadata = []
 
         if self.parallel_windows and self.cache_enabled:
-            return self._create_sequence_samples_parallel(
+            samples, metadata = self._create_sequence_samples_parallel(
                 centroids_df, windows, samples_per_window
             )
         else:
             logging.info("Using sequential processing (parallel disabled or cache unavailable)")
-            return self._create_sequence_samples_sequential(
+            samples, metadata = self._create_sequence_samples_sequential(
                 centroids_df, windows, samples_per_window
             )
 
+        return samples, metadata
+
     def _create_sequence_samples_parallel(self, centroids_df: pd.DataFrame,
-                                         windows: List[Dict], samples_per_window: int) -> List[List[str]]:
-        """Create samples using parallel window processing with checkpointing."""
+                                         windows: List[Dict], samples_per_window: int) -> Tuple[List[List[str]], List[Dict]]:
+        """Create samples using parallel window processing with checkpointing and period tracking."""
         start_time = time.time()
 
         # Check for existing checkpoint
@@ -1114,6 +1176,17 @@ class DatasetCreationPipeline:
             for _, samples in results:
                 all_samples.extend(samples)
 
+        # Create metadata for all samples with period information
+        all_metadata = []
+        for window_idx, window in enumerate(windows):
+            # Each window creates samples_per_window samples
+            # Record the period range for each sample
+            for _ in range(min(samples_per_window, len([s for _, samples in results if _ == window_idx for s in samples]))):
+                all_metadata.append({
+                    'period_start': window['x'][0] if window['x'] else '',
+                    'period_end': window['y']
+                })
+
         elapsed_time = time.time() - start_time
         failed_samples = (len(windows) * samples_per_window) - len(all_samples)
 
@@ -1123,12 +1196,13 @@ class DatasetCreationPipeline:
         logging.info(f"Processing time: {elapsed_time:.1f}s")
         logging.info(f"Throughput: {len(all_samples) / elapsed_time:.1f} samples/sec")
 
-        return all_samples
+        return all_samples, all_metadata
 
     def _create_sequence_samples_sequential(self, centroids_df: pd.DataFrame,
-                                          windows: List[Dict], samples_per_window: int) -> List[List[str]]:
-        """Fallback sequential processing method."""
+                                          windows: List[Dict], samples_per_window: int) -> Tuple[List[List[str]], List[Dict]]:
+        """Fallback sequential processing method with period tracking."""
         sequence_samples = []
+        sequence_metadata = []
         failed_samples = 0
 
         for window_idx, window in enumerate(windows):
@@ -1141,13 +1215,18 @@ class DatasetCreationPipeline:
                     else:
                         sample = self._create_single_sample(centroids_df, window)
                     sequence_samples.append(sample)
+                    # Track period metadata
+                    sequence_metadata.append({
+                        'period_start': window['x'][0] if window['x'] else '',
+                        'period_end': window['y']
+                    })
                 except Exception as e:
                     failed_samples += 1
                     logging.warning(f"Failed to create sample {sample_idx + 1}: {e}")
                     continue
 
         logging.info(f"Sequential processing completed: {len(sequence_samples)} samples, {failed_samples} failed")
-        return sequence_samples
+        return sequence_samples, sequence_metadata
 
     def _create_single_sample_cached_fallback(self, centroids_df: pd.DataFrame, window: Dict) -> List[str]:
         """Create a single sample using cache (fallback for sequential mode)."""
@@ -1305,64 +1384,72 @@ class DatasetCreationPipeline:
         
         return mutated_epitopes > self.max_similar_epitopes
     
-    def _process_samples_to_dataset(self, sequence_samples: List[List[str]]) -> pd.DataFrame:
-        """Process sequence samples into final dataset format using streaming."""
-        logging.info("Processing sequence samples into dataset format...")
+    def _process_samples_to_dataset(self, sequence_samples: List[List[str]],
+                                  window_metadata: List[Dict] = None) -> pd.DataFrame:
+        """Process sequence samples into final dataset format with period tracking."""
+        logging.info("Processing sequence samples into dataset format with period tracking...")
 
         # Handle empty sequence samples (for very small datasets)
         if not sequence_samples:
             logging.warning("No sequence samples to process. Returning empty dataset.")
-            columns = ['y'] + [str(i) for i in range(self.window_size)]
+            columns = ['y'] + [str(i) for i in range(self.window_size)] + ['period_start', 'period_end']
             return pd.DataFrame(columns=columns)
 
         # Check if streaming is enabled
         memory_config = self.config.get('optimization', {}).get('memory', {})
         use_streaming = memory_config.get('use_streaming', True)
-        
+
         if use_streaming and len(sequence_samples) > self.batch_dataset_processor.batch_size:
             logging.info(f"Using streaming dataset creation for {len(sequence_samples)} samples")
-            return self._process_samples_streaming(sequence_samples)
+            return self._process_samples_streaming(sequence_samples, window_metadata)
         else:
             logging.info(f"Using legacy dataset creation for {len(sequence_samples)} samples")
-            return self._process_samples_legacy(sequence_samples)
+            return self._process_samples_legacy(sequence_samples, window_metadata)
     
-    def _process_samples_streaming(self, sequence_samples: List[List[str]]) -> pd.DataFrame:
-        """Process samples using streaming/batch approach."""
+    def _process_samples_streaming(self, sequence_samples: List[List[str]],
+                                 window_metadata: List[Dict] = None) -> pd.DataFrame:
+        """Process samples using streaming/batch approach with period tracking."""
         # Setup streaming output
         temp_output = f"{self.final_dataset_file}.temp"
         self.batch_dataset_processor.setup_output_file(temp_output)
-        
+
+        # Set metadata for period tracking
+        if window_metadata:
+            self.batch_dataset_processor.set_metadata(window_metadata)
+            logging.info(f"Set metadata for {len(window_metadata)} samples in batch processor")
+
         # Process in batches
         self.batch_dataset_processor.process_in_batches(
             sequence_samples,
             description="dataset creation from sequence samples"
         )
-        
+
         # Read back the streaming result
         if os.path.exists(temp_output):
             logging.info("Reading streaming dataset result...")
             dataset_df = pd.read_csv(temp_output)
-            
+
             # Clean up temp file
             os.remove(temp_output)
-            
+
             logging.info(f"Streaming dataset creation completed: {len(dataset_df)} rows")
             return dataset_df
         else:
             logging.warning("No streaming output generated, falling back to legacy method")
-            return self._process_samples_legacy(sequence_samples)
+            return self._process_samples_legacy(sequence_samples, window_metadata)
     
-    def _process_samples_legacy(self, sequence_samples: List[List[str]]) -> pd.DataFrame:
-        """Legacy method for processing samples (fallback for small datasets)."""
+    def _process_samples_legacy(self, sequence_samples: List[List[str]],
+                              window_metadata: List[Dict] = None) -> pd.DataFrame:
+        """Legacy method for processing samples with period tracking."""
         # Extract epitopes with context
         epitope_samples = self._extract_epitopes_with_context(sequence_samples)
-        
+
         # Transform to ProtVec indices
         protvec_samples = self._transform_to_protvec_indices(epitope_samples)
-        
-        # Create final dataset
-        dataset_df = self._create_final_dataframe(protvec_samples)
-        
+
+        # Create final dataset with period metadata
+        dataset_df = self._create_final_dataframe(protvec_samples, window_metadata)
+
         return dataset_df
     
     def _extract_epitopes_with_context(self, sequence_samples: List[List[str]]) -> List[List[List[str]]]:
@@ -1493,56 +1580,68 @@ class DatasetCreationPipeline:
                 indices.append(0)
         return indices
     
-    def _create_final_dataframe(self, protvec_samples: List[List[List[List[int]]]]) -> pd.DataFrame:
-        """Create final dataset DataFrame using efficient batch creation."""
-        logging.info("Creating final dataset DataFrame...")
+    def _create_final_dataframe(self, protvec_samples: List[List[List[List[int]]]],
+                                window_metadata: List[Dict] = None) -> pd.DataFrame:
+        """Create final dataset DataFrame using efficient batch creation with period tracking."""
+        logging.info("Creating final dataset DataFrame with period tracking...")
         logging.info(f"Number of ProtVec samples: {len(protvec_samples)}")
-        
+
         if not protvec_samples:
-            columns = ['y'] + [str(i) for i in range(self.window_size)]
+            columns = ['y'] + [str(i) for i in range(self.window_size)] + ['period_start', 'period_end']
             return pd.DataFrame(columns=columns)
-        
+
         epitopes_count = len(protvec_samples[0][0]) if protvec_samples[0] else 0
         total_expected_rows = len(protvec_samples) * epitopes_count
         logging.info(f"Epitopes per sample: {epitopes_count}")
         logging.info(f"Expected final rows: {len(protvec_samples)} samples × {epitopes_count} epitopes = {total_expected_rows}")
-        
+
         # Pre-allocate list for all rows (much faster than df.loc)
-        logging.info("Starting row generation...")
+        logging.info("Starting row generation with period tracking...")
         all_rows = []
-        
+
         for sample_idx, sample in enumerate(protvec_samples):
             if sample_idx % 50 == 0:
                 logging.info(f"Processing sample {sample_idx + 1}/{len(protvec_samples)} for DataFrame creation")
-            
+
             epitopes_count = len(sample[0])  # Number of epitope positions
-            
+
+            # Get period metadata for this sample if available
+            if window_metadata and sample_idx < len(window_metadata):
+                period_info = window_metadata[sample_idx]
+                period_start = period_info.get('period_start', '')
+                period_end = period_info.get('period_end', '')
+            else:
+                period_start = ''
+                period_end = ''
+
             for epitope_idx in range(epitopes_count):
                 row_data = []
-                
+
                 # Collect data for this epitope position across all sequences in the sample
                 for sequence_idx in range(len(sample)):
                     if epitope_idx < len(sample[sequence_idx]):
                         row_data.append(sample[sequence_idx][epitope_idx])
                     else:
                         row_data.append([])  # Empty if epitope not available
-                
-                # Create row for dataset
+
+                # Create row for dataset with period information
                 dataset_row = self._create_dataset_row(row_data)
+                # Add period metadata
+                dataset_row.extend([period_start, period_end])
                 all_rows.append(dataset_row)
-        
+
         # Create DataFrame from all rows at once (much faster)
-        columns = ['y'] + [str(i) for i in range(self.window_size)]
-        logging.info(f"Creating DataFrame with {len(all_rows)} rows...")
+        columns = ['y'] + [str(i) for i in range(self.window_size)] + ['period_start', 'period_end']
+        logging.info(f"Creating DataFrame with {len(all_rows)} rows and period tracking...")
         df = pd.DataFrame(all_rows, columns=columns)
         logging.info(f"DataFrame created successfully with {len(df)} rows")
-        
-        # Shuffle the dataset
+
+        # Shuffle the dataset (will be handled differently for chronological split)
         logging.info("Shuffling dataset...")
         df = shuffle(df, random_state=42)
         df.reset_index(drop=True, inplace=True)
         logging.info("Dataset shuffling completed")
-        
+
         return df
     
     def _create_dataset_row(self, row_data: List[List[int]]) -> List:

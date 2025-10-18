@@ -147,7 +147,7 @@ create_dataset:
   ]
   epitopes_similarity_threshold: 0.5
   # Target number of rows in the FINAL dataset (after deduplication)
-  dataset_size: 126800 # Target rows after removing duplicates
+  dataset_size: 1268000 # Target rows after removing duplicates
   # Duplication factor to compensate for high duplicate removal rates
   duplication_factor: 5
   # Expected duplicate rate (0.8 = 80% duplicates expected)
@@ -180,13 +180,39 @@ create_dataset:
 train:
   # Model type: 'RNN', 'AttentionRNN', 'DualAttentionRNN', or 'custom'
   model_type: 'DualAttentionRNN'
-  
+
   # Optional: path to custom model (only used if model_type is 'custom')
   # custom_model_path: "path/to/your/custom_model.pth"
-  
-  # Data split ratios: [train, validation, test]
+
+  # Split strategy: 'random' or 'chronological'
+  split_strategy: 'chronological'  # Changed to chronological to prevent data leakage
+
+  # Data split ratios: [train, validation, test] - Used for both strategies
   split_ratio: [0.7, 0.15, 0.15]
-  
+
+  # Chronological split configuration (only used when split_strategy is 'chronological')
+  chronological_split:
+    # Method: 'percentage' or 'fixed_periods'
+    method: 'percentage'
+    # Percentage-based split (uses split_ratio above)
+    # The split_ratio will be applied to the ordered time periods
+    # Example: with 20 periods and [0.7, 0.15, 0.15]:
+    #   - Train: periods 1-14 (70%)
+    #   - Val: periods 15-17 (15%)
+    #   - Test: periods 18-20 (15%)
+
+    # Alternative: Fixed period ranges (uncomment to use)
+    # method: 'fixed_periods'
+    # train_periods: ['2020-2', '2021-6']  # Start and end periods for training
+    # val_periods: ['2021-7', '2021-10']   # Start and end periods for validation
+    # test_periods: ['2021-11', '2022-1']  # Start and end periods for testing
+
+    # Minimum samples per split (to ensure adequate data)
+    min_samples_per_split: 100
+
+    # Whether to log detailed period assignments
+    verbose_logging: true
+
   # Whether to compute logistic regression baseline for comparison
   include_baseline: true
   
