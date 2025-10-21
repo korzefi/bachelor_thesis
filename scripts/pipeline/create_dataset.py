@@ -370,6 +370,18 @@ class CheckpointManager:
             'last_window': self.data['last_completed_window']
         }
 
+    def reset_for_new_iteration(self) -> None:
+        """Reset checkpoint for a new refilling iteration while preserving the checkpoint file."""
+        logging.info("Resetting checkpoint data for new refilling iteration")
+        self.data = {
+            'completed_windows': {},
+            'last_completed_window': -1,
+            'total_samples_created': 0,
+            'start_time': time.time()
+        }
+        # Clear the checkpoint file
+        self.clear_checkpoint()
+
 
 class SequenceCache:
     """Pre-loads and caches all sequences for fast retrieval."""
@@ -894,73 +906,138 @@ class DatasetCreationPipeline:
         refiller_config = self.dataset_config['refiller']
         max_iterations = refiller_config.get('max_iterations', 20)
         target_ratio = refiller_config.get('target_mutated_ratio', 0.2)
-        early_stopping_threshold = refiller_config.get('early_stopping_threshold', 0.95)
+        ratio_tolerance = refiller_config.get('ratio_tolerance', 0.95)
+        no_improvement_max_iterations = refiller_config.get('no_improvement_max_iterations', 3)
+        balancing_method = refiller_config.get('balancing_method', 'downsample_majority')
         expected_dup_rate = self.dataset_config.get('expected_duplicate_rate', 0.8)
 
-        logging.info(f"=== REFILLING MODE ===")
-        logging.info(f"Target FINAL dataset size (after dedup): {self.dataset_size} rows")
-        logging.info(f"Target mutation ratio: {target_ratio:.1%}")
-        logging.info(f"Early stopping threshold: {early_stopping_threshold:.1%} of target")
+        logging.info(f"=== REFILLING MODE (MULTI-OBJECTIVE) ===")
+        logging.info(f"MANDATORY Goal 1: Reach dataset size {self.dataset_size} rows (after dedup)")
+        logging.info(f"MANDATORY Goal 2: Reach mutation ratio {target_ratio:.1%}")
+        logging.info(f"Early stopping: Only via {no_improvement_max_iterations} iterations with no improvement")
+        logging.info(f"Ratio tolerance: {ratio_tolerance:.1%} (will accept {target_ratio * ratio_tolerance:.1%})")
+        logging.info(f"Balancing method: {balancing_method} (applied if sampling doesn't achieve ratio)")
         logging.info(f"Expected duplicate rate: {expected_dup_rate:.1%}")
 
         dataset_df = self._create_dataset()
         dataset_df, initial_duplicate_rate = self._remove_duplicates(dataset_df)
 
         duplicate_rates = [initial_duplicate_rate]
-        no_improvement_count = 0
+        no_improvement_count_size = 0
+        no_improvement_count_ratio = 0
         best_size = len(dataset_df)
+        mutated_count_initial = len(dataset_df[dataset_df['y'] == 1])
+        current_ratio_initial = mutated_count_initial / len(dataset_df) if len(dataset_df) > 0 else 0
+        best_ratio_distance = abs(current_ratio_initial - target_ratio)
 
         for iteration in range(1, max_iterations + 1):
             total_samples = len(dataset_df)
             mutated_samples = len(dataset_df[dataset_df['y'] == 1])
             current_ratio = mutated_samples / total_samples if total_samples > 0 else 0
 
-            # Calculate progress toward target
-            target_progress = (total_samples / self.dataset_size * 100) if self.dataset_size > 0 else 0
-            logging.info(f"Iteration {iteration}: {total_samples}/{self.dataset_size} rows ({target_progress:.1f}% of target)")
-            logging.info(f"  Mutation ratio: {current_ratio:.3f}, Target: {target_ratio:.3f}")
+            # Calculate progress toward BOTH targets
+            size_progress = (total_samples / self.dataset_size * 100) if self.dataset_size > 0 else 0
+            ratio_progress = (current_ratio / target_ratio * 100) if target_ratio > 0 else 0
 
-            # Early stopping conditions
-            if total_samples >= self.dataset_size * early_stopping_threshold:
-                logging.info(f"Early stopping: Reached {early_stopping_threshold*100:.0f}% of target size")
+            logging.info(f"Iteration {iteration}:")
+            logging.info(f"  Size: {total_samples}/{self.dataset_size} ({size_progress:.1f}% of target)")
+            logging.info(f"  Mutation ratio: {current_ratio:.3f} / {target_ratio:.3f} ({ratio_progress:.1f}% of target)")
+
+            # Check both goals
+            size_goal_met = total_samples >= self.dataset_size
+            ratio_goal_met = current_ratio >= target_ratio * ratio_tolerance
+
+            # SUCCESS: Both goals achieved!
+            if size_goal_met and ratio_goal_met:
+                logging.info(f"✓ BOTH mandatory goals achieved!")
+                logging.info(f"  ✓ Size: {total_samples} >= {self.dataset_size}")
+                logging.info(f"  ✓ Ratio: {current_ratio:.3f} >= {target_ratio * ratio_tolerance:.3f}")
                 break
 
-            # Check for improvement
-            if total_samples <= best_size:
-                no_improvement_count += 1
-                if no_improvement_count >= 3:
-                    logging.info("Early stopping: No improvement for 3 iterations")
-                    logging.info(f"  Current: {total_samples} rows, Best: {best_size} rows")
-                    break
-            else:
-                best_size = total_samples
-                no_improvement_count = 0
+            # Track improvement for each goal independently
+            size_improved = False
+            ratio_improved = False
 
-            # Check if target dataset size is achieved
-            if total_samples >= self.dataset_size:
-                logging.info(f"✓ Target dataset size {self.dataset_size} achieved! (Actual: {total_samples})")
+            if total_samples > best_size:
+                best_size = total_samples
+                no_improvement_count_size = 0
+                size_improved = True
+            else:
+                no_improvement_count_size += 1
+
+            ratio_distance = abs(current_ratio - target_ratio)
+            if ratio_distance < best_ratio_distance:
+                best_ratio_distance = ratio_distance
+                no_improvement_count_ratio = 0
+                ratio_improved = True
+            else:
+                no_improvement_count_ratio += 1
+
+            # Early stopping: no improvement for BOTH metrics
+            # This is the ONLY way to exit without meeting both goals
+            if no_improvement_count_size >= no_improvement_max_iterations and \
+               no_improvement_count_ratio >= no_improvement_max_iterations:
+                logging.warning(f"Early stopping: No improvement for {no_improvement_max_iterations} iterations on BOTH metrics")
+                logging.warning(f"  Size stuck at: {total_samples} (target: {self.dataset_size})")
+                logging.warning(f"  Ratio stuck at: {current_ratio:.3f} (target: {target_ratio:.3f})")
+                logging.warning(f"Will attempt balancing to achieve ratio goal...")
                 break
 
             # Calculate how many more samples we need
-            needed_samples = self.dataset_size - total_samples
-            if needed_samples > 0:
-                # Adjust duplication factor based on observed duplicate rates
-                avg_duplicate_rate = sum(duplicate_rates) / len(duplicate_rates)
-                if avg_duplicate_rate > 0.8:  # If >80% duplicates, increase factor
-                    self.duplication_factor = min(50, int(self.duplication_factor * 1.5))
-                    logging.info(f"High duplicate rate ({avg_duplicate_rate:.1%}), increasing duplication factor to {self.duplication_factor}")
+            size_deficit = max(0, self.dataset_size - total_samples)
 
-                # Create additional samples
-                # Set current_dataset_size to the number of additional rows needed
-                # This will be properly converted to sequence samples in _create_sequence_samples
-                self.current_dataset_size = needed_samples
-                logging.info(f"Creating additional samples to reach target: need {needed_samples} more rows")
-                additional_df = self._create_dataset()
+            if size_deficit > 0:
+                # Need more samples for size goal
+                needed_samples = size_deficit
+                logging.info(f"Creating {needed_samples} more samples to reach size goal...")
+            elif not ratio_goal_met:
+                # Size goal met but ratio not met - create more samples hoping to improve ratio
+                # This is heuristic since we can't directly control mutation rate
+                needed_samples = int(total_samples * 0.15)  # Create 15% more samples
+                logging.info(f"Size goal met but ratio below target.")
+                logging.info(f"Creating {needed_samples} additional samples (15% of current) to attempt ratio improvement...")
+            else:
+                # Both goals met (should have broken above, but defensive check)
+                logging.info(f"Both goals met, stopping refilling")
+                break
 
-                # Combine datasets and remove duplicates
-                dataset_df = pd.concat([dataset_df, additional_df], ignore_index=True)
-                dataset_df, iteration_duplicate_rate = self._remove_duplicates(dataset_df)
-                duplicate_rates.append(iteration_duplicate_rate)
+            # Adjust duplication factor based on observed duplicate rates
+            avg_duplicate_rate = sum(duplicate_rates) / len(duplicate_rates)
+            if avg_duplicate_rate > 0.8:
+                self.duplication_factor = min(50, int(self.duplication_factor * 1.5))
+                logging.info(f"High duplicate rate ({avg_duplicate_rate:.1%}), increasing duplication factor to {self.duplication_factor}")
+
+            # Create additional samples
+            self.current_dataset_size = needed_samples
+            additional_df = self._create_dataset()
+
+            # Combine datasets and remove duplicates
+            dataset_df = pd.concat([dataset_df, additional_df], ignore_index=True)
+            dataset_df, iteration_duplicate_rate = self._remove_duplicates(dataset_df)
+            duplicate_rates.append(iteration_duplicate_rate)
+
+            # Clear checkpoint for next iteration to prevent reusing cached samples
+            if self.checkpoint_manager:
+                self.checkpoint_manager.reset_for_new_iteration()
+
+        # FINAL BALANCING STEP (MANDATORY unless balancing_method='none')
+        total_samples = len(dataset_df)
+        mutated_samples = len(dataset_df[dataset_df['y'] == 1])
+        final_ratio = mutated_samples / total_samples if total_samples > 0 else 0
+
+        if final_ratio < target_ratio * ratio_tolerance:
+            logging.info(f"=== FINAL BALANCING (RATIO GOAL NOT MET) ===")
+            logging.info(f"Current ratio {final_ratio:.3f} < target {target_ratio:.3f} * tolerance {ratio_tolerance}")
+            logging.info(f"Applying balancing method: {balancing_method}")
+            dataset_df = self._balance_mutation_ratio(dataset_df, target_ratio, balancing_method)
+
+            # Recalculate after balancing
+            total_samples = len(dataset_df)
+            mutated_samples = len(dataset_df[dataset_df['y'] == 1])
+            final_ratio = mutated_samples / total_samples if total_samples > 0 else 0
+        else:
+            logging.info(f"✓ Ratio goal achieved via sampling: {final_ratio:.3f} >= {target_ratio * ratio_tolerance:.3f}")
+            logging.info(f"No balancing needed")
 
         # Save final dataset
         self._save_dataset(dataset_df)
@@ -987,7 +1064,123 @@ class DatasetCreationPipeline:
         # Clear checkpoint after successful completion
         if self.checkpoint_manager:
             self.checkpoint_manager.clear_checkpoint()
-    
+
+    def _balance_mutation_ratio(self, dataset_df: pd.DataFrame, target_ratio: float,
+                               balancing_method: str) -> pd.DataFrame:
+        """Balance mutation ratio using configured balancing method.
+
+        Args:
+            dataset_df: Current dataset DataFrame
+            target_ratio: Target mutation ratio (e.g., 0.2 for 20% mutated)
+            balancing_method: Balancing strategy ('downsample_majority', 'oversample_minority', 'none')
+
+        Returns:
+            Balanced dataset DataFrame
+        """
+        total_samples = len(dataset_df)
+        mutated_samples = len(dataset_df[dataset_df['y'] == 1])
+        current_ratio = mutated_samples / total_samples if total_samples > 0 else 0
+
+        logging.info(f"Balancing mutation ratio: current={current_ratio:.3f}, target={target_ratio:.3f}")
+
+        # Check if already at target
+        if current_ratio >= target_ratio * 0.95:  # Within 5% tolerance
+            logging.info(f"Current ratio {current_ratio:.3f} is already close to target {target_ratio:.3f}")
+            return dataset_df
+
+        if balancing_method == 'none':
+            logging.warning(f"Balancing method is 'none' - accepting achieved ratio of {current_ratio:.3f}")
+            logging.warning(f"Target ratio {target_ratio:.3f} was not achieved")
+            return dataset_df
+
+        elif balancing_method == 'downsample_majority':
+            # Remove non-mutated samples to achieve target ratio
+            # Formula: mutated / (mutated + non_mutated_kept) = target_ratio
+            # Solving for non_mutated_kept: non_mutated_kept = mutated / target_ratio - mutated
+            non_mutated_samples = len(dataset_df[dataset_df['y'] == 0])
+
+            if mutated_samples == 0:
+                logging.error("Cannot balance: no mutated samples exist!")
+                return dataset_df
+
+            # Calculate how many non-mutated samples to keep
+            target_non_mutated = int(mutated_samples / target_ratio) - mutated_samples
+            target_non_mutated = max(0, target_non_mutated)
+
+            if target_non_mutated >= non_mutated_samples:
+                logging.warning(f"Cannot downsample: need {target_non_mutated} non-mutated but only have {non_mutated_samples}")
+                logging.warning(f"Keeping all non-mutated samples (ratio will be {current_ratio:.3f})")
+                return dataset_df
+
+            # Downsample non-mutated class
+            mutated_df = dataset_df[dataset_df['y'] == 1]
+            non_mutated_df = dataset_df[dataset_df['y'] == 0]
+            non_mutated_sampled = non_mutated_df.sample(n=target_non_mutated, random_state=42)
+
+            # Combine and shuffle
+            balanced_df = pd.concat([mutated_df, non_mutated_sampled], ignore_index=True)
+            balanced_df = shuffle(balanced_df, random_state=42)
+            balanced_df.reset_index(drop=True, inplace=True)
+
+            new_total = len(balanced_df)
+            new_ratio = mutated_samples / new_total if new_total > 0 else 0
+
+            logging.info(f"Downsampled majority class (y=0): {non_mutated_samples} → {target_non_mutated} samples")
+            logging.info(f"New dataset size: {total_samples} → {new_total} rows")
+            logging.info(f"New mutation ratio: {current_ratio:.3f} → {new_ratio:.3f}")
+
+            return balanced_df
+
+        elif balancing_method == 'oversample_minority':
+            # Duplicate mutated samples to achieve target ratio
+            # Formula: (mutated * oversample_factor) / (mutated * oversample_factor + non_mutated) = target_ratio
+            # Solving for oversample_factor: oversample_factor = (target_ratio * non_mutated) / (mutated * (1 - target_ratio))
+            non_mutated_samples = len(dataset_df[dataset_df['y'] == 0])
+
+            if mutated_samples == 0:
+                logging.error("Cannot balance: no mutated samples to oversample!")
+                return dataset_df
+
+            if target_ratio >= 1.0:
+                logging.warning(f"Target ratio {target_ratio} >= 1.0, cannot oversample to achieve this")
+                return dataset_df
+
+            # Calculate how many mutated samples we need total
+            target_mutated_total = int((target_ratio * non_mutated_samples) / (1 - target_ratio))
+
+            if target_mutated_total <= mutated_samples:
+                logging.warning(f"Cannot oversample: already have {mutated_samples} mutated, need {target_mutated_total}")
+                logging.warning(f"Keeping current distribution (ratio will be {current_ratio:.3f})")
+                return dataset_df
+
+            # Oversample mutated class
+            mutated_df = dataset_df[dataset_df['y'] == 1]
+            non_mutated_df = dataset_df[dataset_df['y'] == 0]
+
+            # Sample with replacement to reach target
+            additional_mutated_needed = target_mutated_total - mutated_samples
+            mutated_oversampled = mutated_df.sample(n=additional_mutated_needed, replace=True, random_state=42)
+
+            # Combine and shuffle
+            balanced_df = pd.concat([dataset_df, mutated_oversampled], ignore_index=True)
+            balanced_df = shuffle(balanced_df, random_state=42)
+            balanced_df.reset_index(drop=True, inplace=True)
+
+            new_total = len(balanced_df)
+            new_mutated = len(balanced_df[balanced_df['y'] == 1])
+            new_ratio = new_mutated / new_total if new_total > 0 else 0
+
+            logging.info(f"Oversampled minority class (y=1): {mutated_samples} → {new_mutated} samples")
+            logging.info(f"New dataset size: {total_samples} → {new_total} rows")
+            logging.info(f"New mutation ratio: {current_ratio:.3f} → {new_ratio:.3f}")
+
+            return balanced_df
+
+        else:
+            logging.error(f"Unknown balancing method: {balancing_method}")
+            logging.warning(f"Accepted methods: 'downsample_majority', 'oversample_minority', 'none'")
+            return dataset_df
+
     def _create_dataset(self) -> pd.DataFrame:
         """Create the main dataset with period tracking."""
         # Load linked centroids
@@ -1141,6 +1334,14 @@ class DatasetCreationPipeline:
              sequence_cache_data, pipeline_config)
             for window_idx, window in windows_to_process
         ]
+
+        # Log checkpoint status for debugging
+        if self.checkpoint_manager:
+            logging.info(f"=== CHECKPOINT STATUS ===")
+            logging.info(f"Resume point: window {resume_point}")
+            logging.info(f"Total windows: {len(windows)}")
+            logging.info(f"Windows to process: {len(windows_to_process)}")
+            logging.info(f"Windows already completed: {resume_point}")
 
         logging.info(f"Processing {len(worker_args)} windows with {self.window_workers} parallel workers")
 

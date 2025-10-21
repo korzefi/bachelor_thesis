@@ -153,12 +153,37 @@ create_dataset:
   # Expected duplicate rate (0.8 = 80% duplicates expected)
   # Used to better estimate initial overproduction needed
   expected_duplicate_rate: 0.8
-  # For refilling dataset to meet ratio
+  # Refiller: Iteratively creates samples to reach TWO MANDATORY goals:
+  #   Goal 1: Reach target dataset_size (configurable via dataset_size parameter)
+  #   Goal 2: Reach target_mutated_ratio (configurable below)
+  # BOTH goals must be met (or balancing will be applied to achieve ratio goal)
+  # The only early stop is via no_improvement_max_iterations
   refiller:
     enabled: true
-    max_iterations: 200
+
+    # === STOPPING CONDITIONS ===
+    # Maximum refilling iterations before stopping
+    max_iterations: 50
+
+    # Stop if no improvement for this many consecutive iterations
+    # This is the ONLY way to exit without meeting both goals
+    no_improvement_max_iterations: 10
+
+    # === MUTATION RATIO GOAL (MANDATORY) ===
+    # Target mutation ratio to achieve (0.2 = 20% mutated samples)
+    # This is a REQUIRED goal - balancing will be applied if not achieved via sampling
     target_mutated_ratio: 0.2
-    early_stopping_threshold: 0.95  # Moved from optimization.algorithms
+
+    # Tolerance for mutation ratio (0.95 = accept 19% when target is 20%)
+    ratio_tolerance: 0.95
+
+    # === BALANCING METHOD ===
+    # Applied if ratio cannot be achieved through sampling alone
+    # Options:
+    #   'downsample_majority': Remove non-mutated samples (reduces dataset size)
+    #   'oversample_minority': Duplicate mutated samples (increases dataset size)
+    #   'none': No balancing (accept whatever ratio was achieved)
+    balancing_method: 'downsample_majority'
 
   # Parallel processing configuration
   parallel:
