@@ -223,22 +223,22 @@ class ModelEvaluator:
         Reshape temporal data to linear format for logistic regression.
         This matches the original reshape_to_linear() function.
         """
-        # X shape: [seq_length, batch_size, feature_dim]
+        # X shape: [batch_size, seq_length, feature_dim]
         # We want: [batch_size, flattened_features]
-        
+
         X_np = X.cpu().numpy()
-        seq_length, batch_size, feature_dim = X_np.shape
-        
+        batch_size, seq_length, feature_dim = X_np.shape
+
         # Take the last window_size timesteps
         start_idx = max(0, seq_length - window_size)
-        X_windowed = X_np[start_idx:, :, :]
-        
+        X_windowed = X_np[:, start_idx:, :]  # [batch_size, window_size, feature_dim]
+
         # Flatten temporal and feature dimensions
         reshaped = []
         for batch_idx in range(batch_size):
-            flattened = X_windowed[:, batch_idx, :].flatten().tolist()
+            flattened = X_windowed[batch_idx, :, :].flatten().tolist()
             reshaped.append(flattened)
-        
+
         return reshaped
     
     def list_summary(self, name: str, data: np.ndarray) -> None:

@@ -52,7 +52,7 @@ class ModelTrainer:
         torch.manual_seed(42)
     
     def train(
-        self, 
+        self,
         model: nn.Module,
         X_train: torch.Tensor,
         y_train: torch.Tensor,
@@ -61,16 +61,23 @@ class ModelTrainer:
     ) -> Tuple[nn.Module, Dict[str, List[float]]]:
         """Train the model with comprehensive metrics tracking."""
         logging.info("Starting model training with comprehensive metrics...")
-        logging.info(f"Training samples: {X_train.shape[1]}, Validation samples: {y_val.shape[0]}")
+        logging.info(f"Training samples: {X_train.shape[0]}, Validation samples: {y_val.shape[0]}")
         logging.info(f"Epochs: {self.epochs}, Batch size: {self.batch_size}, Learning rate: {self.learning_rate}")
         
         # Setup training components
         criterion = nn.CrossEntropyLoss()
         optimizer = torch.optim.Adam(model.parameters(), lr=self.learning_rate)
-        
+
         # Calculate batching parameters
-        num_examples = X_train.shape[1]
+        num_examples = X_train.shape[0]
         num_batches = math.floor(num_examples / self.batch_size)
+
+        # Defensive check: ensure we have enough data for at least one batch
+        if num_batches == 0:
+            raise ValueError(
+                f"Insufficient training data: {num_examples} samples < batch size {self.batch_size}. "
+                f"Either reduce batch_size or provide more training data."
+            )
         
         # Training history - comprehensive metrics tracking
         training_history = {
@@ -94,7 +101,7 @@ class ModelTrainer:
         # Find a validation batch with mutations for attention plotting
         plot_batch_size = 10
         plot_batch_idx = self._find_mutation_batch(y_val, plot_batch_size)
-        X_plot_batch = X_val[:, plot_batch_idx:plot_batch_idx + plot_batch_size, :]
+        X_plot_batch = X_val[plot_batch_idx:plot_batch_idx + plot_batch_size, :, :]
         y_plot_batch = y_val[plot_batch_idx:plot_batch_idx + plot_batch_size]
         plot_batch_scores = []
         
@@ -184,16 +191,16 @@ class ModelTrainer:
         
         # Initialize hidden state
         hidden = model.init_hidden(self.batch_size)
-        
+
         # Batch training loop
-        for start_idx in range(0, X_train.shape[1] - self.batch_size + 1, self.batch_size):
+        for start_idx in range(0, X_train.shape[0] - self.batch_size + 1, self.batch_size):
             end_idx = start_idx + self.batch_size
             
             # Repackage hidden state to detach from history
             hidden = self._repackage_hidden(hidden)
-            
+
             # Get batch
-            X_batch = X_train[:, start_idx:end_idx, :]
+            X_batch = X_train[start_idx:end_idx, :, :]
             y_batch = y_train[start_idx:end_idx]
             
             # Forward pass
@@ -211,9 +218,9 @@ class ModelTrainer:
             
             all_predictions.extend(predictions.cpu().numpy().flatten())
             all_labels.extend(y_batch.cpu().numpy())
-        
+
         # Calculate comprehensive metrics
-        avg_loss = running_loss / num_batches
+        avg_loss = running_loss / num_batches if num_batches > 0 else 0.0
         accuracy, precision, recall, fscore, mcc = self.evaluator.evaluate(
             torch.tensor(all_labels), torch.tensor(all_predictions)
         )
@@ -291,7 +298,7 @@ class ModelTrainer:
         """Get a comprehensive summary of training metrics."""
         if not history['val_mcc']:
             return {}
-        
+
         return {
             'final_train_acc': history['train_acc'][-1],
             'final_val_acc': history['val_acc'][-1],
@@ -301,6 +308,7 @@ class ModelTrainer:
             'final_train_loss': history['train_loss'][-1],
             'final_val_loss': history['val_loss'][-1],
             'best_val_fscore': max(history['val_fscore']),
+            'final_val_fscore': history['val_fscore'][-1],
             'final_val_precision': history['val_precision'][-1],
             'final_val_recall': history['val_recall'][-1]
         }
