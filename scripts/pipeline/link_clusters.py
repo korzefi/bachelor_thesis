@@ -61,15 +61,40 @@ class ClusterLinkingPipeline:
         """Load cluster centroids data from CSV file."""
         if not Path(self.centroids_file).exists():
             raise FileNotFoundError(f"Centroids file not found: {self.centroids_file}")
-        
+
         logging.info(f"Loading centroids data from: {self.centroids_file}")
         df = pd.read_csv(self.centroids_file)
-        
+
         if df.empty:
             raise ValueError("Centroids file is empty")
-        
+
+        # Validate no duplicate (period, cluster) pairs
+        self._validate_no_duplicates(df)
+
         logging.info(f"Loaded {len(df)} cluster centroids from {df['period'].nunique()} periods")
         return df
+
+    def _validate_no_duplicates(self, df: pd.DataFrame) -> None:
+        """Validate that there are no duplicate (period, cluster) pairs."""
+        total_rows = len(df)
+        unique_rows = len(df.drop_duplicates(subset=['period', 'cluster']))
+
+        if total_rows != unique_rows:
+            duplicates_count = total_rows - unique_rows
+
+            # Find example duplicates for error message
+            duplicates = df[df.duplicated(subset=['period', 'cluster'], keep=False)]
+            duplicate_examples = duplicates[['period', 'cluster']].drop_duplicates().head(5)
+
+            error_msg = (
+                f"Found {duplicates_count} duplicate (period, cluster) pairs in centroids file!\n"
+                f"Total rows: {total_rows}, Unique pairs: {unique_rows}\n"
+                f"Example duplicates:\n{duplicate_examples}\n\n"
+                f"This likely means clustering was run multiple times without clearing the centroids file.\n"
+                f"Solution: Delete '{self.centroids_file}' and rerun clustering."
+            )
+
+            raise ValueError(error_msg)
     
     def _sort_centroids(self, df: pd.DataFrame) -> pd.DataFrame:
         """Sort centroids by period and cluster number using natural sorting."""
@@ -293,25 +318,52 @@ class ClusterLinkingPipeline:
         return combined_links
     
     def _format_cluster_links(
-        self, 
-        df: pd.DataFrame, 
+        self,
+        df: pd.DataFrame,
         combined_links: Dict[int, List[int]]
     ) -> List[str]:
-        """Format cluster links as strings."""
+        """Format cluster links as strings with deduplication."""
         cluster_link_strings = []
-        
+        deduplication_warnings = 0
+
         for i in range(len(df)):
             if i in combined_links:
                 # Get cluster numbers for the linked indices
                 linked_clusters = [df.loc[idx, 'cluster'] for idx in combined_links[i]]
+
+                # Remove duplicates while preserving order
+                unique_clusters = []
+                seen = set()
+                for cluster_num in linked_clusters:
+                    if cluster_num not in seen:
+                        unique_clusters.append(cluster_num)
+                        seen.add(cluster_num)
+
+                # Warn if duplicates were found
+                if len(linked_clusters) != len(unique_clusters):
+                    deduplication_warnings += 1
+                    if deduplication_warnings <= 5:  # Only log first 5 cases
+                        current_period = df.loc[i, 'period']
+                        current_cluster = df.loc[i, 'cluster']
+                        logging.warning(
+                            f"Deduplication: {current_period} cluster {current_cluster} "
+                            f"had duplicate links {linked_clusters} -> {unique_clusters}"
+                        )
+
                 # Convert to string format: "cluster1-cluster2-cluster3"
-                link_string = '-'.join(map(str, linked_clusters))
+                link_string = '-'.join(map(str, unique_clusters))
             else:
                 # No links for this cluster
                 link_string = ''
-            
+
             cluster_link_strings.append(link_string)
-        
+
+        if deduplication_warnings > 0:
+            logging.warning(
+                f"Removed duplicate cluster references from {deduplication_warnings} links. "
+                f"This may indicate duplicate centroids in the source file."
+            )
+
         return cluster_link_strings
     
     def _add_links_to_dataframe(

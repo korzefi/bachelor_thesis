@@ -574,8 +574,11 @@ class ClusteringPipeline:
             # Validate SOURCE files (not vector files - those don't exist yet!)
             valid_period_files = self._validate_source_period_files(period_files)
 
-            # Clean up corrupted centroids file if needed
-            self._cleanup_corrupted_centroids_file()
+            # Clean up and reinitialize centroids file for fresh run
+            if os.path.exists(self.centroids_file):
+                logging.info(f"Removing existing centroids file: {self.centroids_file}")
+                os.remove(self.centroids_file)
+            self._initialize_centroids_file()
 
             phase1_elapsed = time.time() - phase1_start
             logging.info(f"✅ Phase 1 complete: {len(valid_period_files)}/{len(period_files)} valid source files in {self._format_time(phase1_elapsed)}")
@@ -1126,8 +1129,31 @@ class ClusteringPipeline:
         # Initialize centroids file
         self._initialize_centroids_file()
 
-        # Get vector files
-        vector_files = natsorted([f for f in os.listdir(self.vector_temp_dir) if f.endswith('.csv')])
+        # Get vector files - filter based on auto_k_selection config
+        auto_k_config = self.cluster_config.get('auto_k_selection', {})
+        auto_k_enabled = auto_k_config.get('enabled', False)
+
+        all_vector_files = natsorted([f for f in os.listdir(self.vector_temp_dir) if f.endswith('.csv')])
+
+        if auto_k_enabled:
+            # Process all vector files when auto k-selection is enabled
+            vector_files = all_vector_files
+            logging.info(f"Auto k-selection enabled: processing all {len(vector_files)} vector files")
+        else:
+            # Filter files based on clusters_per_period configuration
+            clusters_per_period = self.cluster_config.get('clusters_per_period', {})
+            if not clusters_per_period:
+                raise ValueError("clusters_per_period configuration is empty and auto_k_selection is disabled")
+
+            vector_files = [f for f in all_vector_files if f in clusters_per_period]
+
+            if not vector_files:
+                raise ValueError(
+                    f"No vector files match clusters_per_period configuration. "
+                    f"Found {len(all_vector_files)} vector files but none match config keys: {list(clusters_per_period.keys())}"
+                )
+
+            logging.info(f"Manual k configuration: processing {len(vector_files)}/{len(all_vector_files)} configured vector files")
 
         # Determine number of jobs
         n_jobs = min(len(vector_files), os.cpu_count())
@@ -1246,7 +1272,14 @@ class ClusteringPipeline:
             if cluster_config.get('auto_k_selection', {}).get('enabled', False):
                 n_clusters = ClusteringPipeline._find_optimal_k_static(vectors_df.values, cluster_config)
             else:
-                n_clusters = cluster_config['clusters_per_period'].get(period_file, 5)
+                # Raise error if period not found in config instead of defaulting to 5
+                clusters_per_period = cluster_config.get('clusters_per_period', {})
+                if period_file not in clusters_per_period:
+                    raise ValueError(
+                        f"Period '{period_file}' not found in clusters_per_period configuration. "
+                        f"Available periods: {list(clusters_per_period.keys())}"
+                    )
+                n_clusters = clusters_per_period[period_file]
 
             # Use MiniBatchKMeans for speed
             from sklearn.cluster import MiniBatchKMeans

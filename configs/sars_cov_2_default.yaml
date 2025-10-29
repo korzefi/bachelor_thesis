@@ -101,7 +101,7 @@ cluster:
   
   # Automatic k-selection using Silhouette Score
   auto_k_selection:
-    enabled: true
+    enabled: false
     min_k: 2
     max_k: 19
   
@@ -109,30 +109,30 @@ cluster:
   # This maps a period file to a pre-determined number of clusters.
   # For generalization, this section is now optional when auto_k_selection is enabled.
   clusters_per_period:
-    '2020-2.csv': 2
-    '2020-3.csv': 2
-    '2020-4.csv': 2
-    '2020-5.csv': 2
-    '2020-6.csv': 2
-    '2020-7.csv': 3
-    '2020-8.csv': 3
-    '2020-9.csv': 4
+    '2020-02.csv': 2
+    '2020-03.csv': 2
+    '2020-04.csv': 2
+    '2020-05.csv': 2
+    '2020-06.csv': 2
+    '2020-07.csv': 3
+    '2020-08.csv': 3
+    '2020-09.csv': 4
     '2020-10.csv': 4
     '2020-11.csv': 5
     '2020-12.csv': 6
-    '2021-1.csv': 7
-    '2021-2.csv': 8
-    '2021-3.csv': 8
-    '2021-4.csv': 8
-    '2021-5.csv': 9
-    '2021-6.csv': 10
-    '2021-7.csv': 11
-    '2021-8.csv': 11
-    '2021-9.csv': 12
+    '2021-01.csv': 7
+    '2021-02.csv': 8
+    '2021-03.csv': 8
+    '2021-04.csv': 8
+    '2021-05.csv': 9
+    '2021-06.csv': 10
+    '2021-07.csv': 11
+    '2021-08.csv': 11
+    '2021-09.csv': 12
     '2021-10.csv': 14
     '2021-11.csv': 15
     '2021-12.csv': 16
-    '2022-1.csv': 18
+    '2022-01.csv': 18
 
 # 3. Link Clusters (from ClusterLinker.py) - No extra params needed
 
