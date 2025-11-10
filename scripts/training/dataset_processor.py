@@ -219,6 +219,7 @@ class DatasetProcessor:
     def _chronological_split(self, X: np.ndarray, y: np.ndarray,
                            period_start: np.ndarray, period_end: np.ndarray) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Chronological split to prevent data leakage in time series."""
+
         train_ratio, val_ratio, test_ratio = self.split_ratio
         chrono_config = self.train_config.get('chronological_split', {})
         method = chrono_config.get('method', 'percentage')
@@ -227,8 +228,29 @@ class DatasetProcessor:
 
         logging.info(f"=== CHRONOLOGICAL SPLIT (method: {method}) ===")
 
-        # Get unique periods and sort them chronologically
-        unique_periods = sorted(set(period_end))
+        # Filter out NaN values before processing
+        # This prevents "cannot compare str and float" errors
+        valid_period_mask = pd.notna(period_end)
+        period_coverage = valid_period_mask.sum() / len(period_end) * 100
+
+        logging.info(f"Period coverage: {valid_period_mask.sum()}/{len(period_end)} samples ({period_coverage:.1f}%)")
+
+        # Check if we have sufficient period information
+        if period_coverage < 10:  # Less than 10% has period info
+            logging.warning(
+                f"Insufficient period information: only {period_coverage:.1f}% of samples have period data. "
+                f"Falling back to random split."
+            )
+            return self._random_split(X, y)
+
+        if period_coverage < 100:
+            logging.warning(
+                f"Only {period_coverage:.1f}% of samples have period information. "
+                f"Samples without period data will be excluded from chronological split."
+            )
+
+        # Get unique periods and sort them chronologically (excluding NaN)
+        unique_periods = sorted(set(period_end[valid_period_mask]))
         num_periods = len(unique_periods)
 
         if verbose:

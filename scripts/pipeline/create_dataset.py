@@ -260,12 +260,26 @@ class BatchDatasetProcessor(BatchProcessor):
         return result_row
     
     def _sequences_similar(self, seq1: List[int], seq2: List[int]) -> bool:
-        """Check if two sequences are similar (have 3 or more matching elements)."""
+        """Check if two sequences are similar using position-wise comparison.
+
+        Compares sequences element-by-element at each position, which is more
+        accurate than set intersection that ignores order and duplicates.
+        """
         if not seq1 or not seq2:
             return True
-        
-        matching_elements = len(set(seq1) & set(seq2))
-        return matching_elements >= 3
+
+        # Sequences must have same length for position-wise comparison
+        if len(seq1) != len(seq2):
+            return False
+
+        # Count position-wise matches
+        matches = sum(1 for a, b in zip(seq1, seq2) if a == b)
+
+        # Use 67% similarity threshold or minimum 2 matches (whichever is larger)
+        # This allows some tolerance for single mutations while catching major changes
+        threshold = max(2, int(len(seq1) * 0.67))
+
+        return matches >= threshold
 
 
 class DatasetCreationError(Exception):
@@ -634,13 +648,29 @@ def _link_remaining_sequences_cached(centroids_df, first_sequence_info, window,
         else:
             current_next_clusters = [int(x) for x in str(next_clusters_str).split('-') if x.strip()]
 
-    # Add y period sequence (target)
+    # Add y period sequence (target) with mutation threshold check
     y_period = window['y']
     if current_next_clusters:
         target_cluster = random.choice(current_next_clusters)
         cache_key = (y_period, target_cluster)
         if cache_key in sequence_cache_data and sequence_cache_data[cache_key]:
-            target_sequence = random.choice(sequence_cache_data[cache_key])
+            cached_sequences = sequence_cache_data[cache_key]
+            previous_sequence = sequences[-1]
+
+            # Retry if target is mutated too much from last input
+            max_mutation_retries = 10
+            retry_count = 0
+            target_sequence = None
+
+            while retry_count < max_mutation_retries:
+                target_sequence = random.choice(cached_sequences)
+                if not _is_mutated_too_much_cached(previous_sequence, target_sequence, epitopes_positions, max_similar_epitopes):
+                    break
+                retry_count += 1
+
+            if retry_count >= max_mutation_retries:
+                raise SequencesMutatedTooMuch()
+
             sequences.append(target_sequence)
         else:
             raise DatasetCreationError(f"No sequences in cache for cluster {target_cluster} in period {y_period}")
@@ -1369,30 +1399,87 @@ class DatasetCreationPipeline:
                 pool.join()
                 raise
 
-        # Collect all completed samples (including from checkpoint)
-        if self.checkpoint_manager:
-            all_samples = self.checkpoint_manager.get_completed_samples()
-        else:
-            all_samples = []
-            for _, samples in results:
-                all_samples.extend(samples)
-
-        # Create metadata for all samples with period information
+        # Collect all completed samples (including from checkpoint) WITH metadata
+        # Create metadata directly as we collect samples to ensure 1:1 mapping
+        all_samples = []
         all_metadata = []
-        for window_idx, window in enumerate(windows):
-            # Each window creates samples_per_window samples
-            # Record the period range for each sample
-            for _ in range(min(samples_per_window, len([s for _, samples in results if _ == window_idx for s in samples]))):
-                all_metadata.append({
-                    'period_start': window['x'][0] if window['x'] else '',
-                    'period_end': window['y']
-                })
+
+        if self.checkpoint_manager:
+            # Load samples from checkpoint
+            checkpoint_samples = self.checkpoint_manager.get_completed_samples()
+            checkpoint_sample_count = len(checkpoint_samples)
+
+            logging.info(f"Loaded {checkpoint_sample_count} samples from checkpoint")
+
+            # Reconstruct metadata for checkpoint samples
+            # Samples are distributed uniformly: samples_per_window per window
+            sample_idx = 0
+
+            for window_idx, window in enumerate(windows):
+                # Calculate how many samples this window contributed to checkpoint
+                window_sample_count = min(samples_per_window, checkpoint_sample_count - sample_idx)
+
+                if window_sample_count <= 0:
+                    break
+
+                # Add samples and metadata for this window
+                for i in range(window_sample_count):
+                    if sample_idx < checkpoint_sample_count:
+                        all_samples.append(checkpoint_samples[sample_idx])
+                        all_metadata.append({
+                            'period_start': window['x'][0] if window['x'] else '',
+                            'period_end': window['y']
+                        })
+                        sample_idx += 1
+
+            logging.info(f"Reconstructed metadata for {len(all_metadata)} checkpoint samples")
+
+            # Add newly processed samples and their metadata
+            new_samples_count = 0
+            for window_idx, window_samples in results:
+                window = windows[window_idx] if window_idx < len(windows) else None
+                if window:
+                    for sample in window_samples:
+                        all_samples.append(sample)
+                        all_metadata.append({
+                            'period_start': window['x'][0] if window['x'] else '',
+                            'period_end': window['y']
+                        })
+                        new_samples_count += 1
+
+            if new_samples_count > 0:
+                logging.info(f"Added {new_samples_count} new samples with metadata")
+
+        else:
+            # Direct collection: create metadata for each sample as we collect it
+            for window_idx, window_samples in results:
+                # Get the corresponding window
+                window = windows[window_idx] if window_idx < len(windows) else None
+                if window:
+                    # For each sample from this window, create a metadata entry
+                    for sample in window_samples:
+                        all_samples.append(sample)
+                        all_metadata.append({
+                            'period_start': window['x'][0] if window['x'] else '',
+                            'period_end': window['y']
+                        })
+
+        # Validation: Ensure 1:1 mapping
+        if len(all_samples) != len(all_metadata):
+            logging.error(f"CRITICAL: Sample-metadata count mismatch!")
+            logging.error(f"  Samples: {len(all_samples)}")
+            logging.error(f"  Metadata: {len(all_metadata)}")
+            raise ValueError(
+                f"Sample count ({len(all_samples)}) does not match metadata count ({len(all_metadata)}). "
+                f"This will cause period tracking to fail."
+            )
 
         elapsed_time = time.time() - start_time
         failed_samples = (len(windows) * samples_per_window) - len(all_samples)
 
         logging.info(f"=== PARALLEL PROCESSING COMPLETED ===")
         logging.info(f"Total samples created: {len(all_samples)}")
+        logging.info(f"Metadata entries created: {len(all_metadata)}")
         logging.info(f"Failed samples: {failed_samples}")
         logging.info(f"Processing time: {elapsed_time:.1f}s")
         logging.info(f"Throughput: {len(all_samples) / elapsed_time:.1f} samples/sec")
@@ -1426,7 +1513,17 @@ class DatasetCreationPipeline:
                     logging.warning(f"Failed to create sample {sample_idx + 1}: {e}")
                     continue
 
-        logging.info(f"Sequential processing completed: {len(sequence_samples)} samples, {failed_samples} failed")
+        # Validation: Ensure 1:1 mapping
+        if len(sequence_samples) != len(sequence_metadata):
+            logging.error(f"CRITICAL: Sample-metadata count mismatch in sequential processing!")
+            logging.error(f"  Samples: {len(sequence_samples)}")
+            logging.error(f"  Metadata: {len(sequence_metadata)}")
+            raise ValueError(
+                f"Sample count ({len(sequence_samples)}) does not match metadata count ({len(sequence_metadata)}). "
+                f"This will cause period tracking to fail."
+            )
+
+        logging.info(f"Sequential processing completed: {len(sequence_samples)} samples, {len(sequence_metadata)} metadata entries, {failed_samples} failed")
         return sequence_samples, sequence_metadata
 
     def _create_single_sample_cached_fallback(self, centroids_df: pd.DataFrame, window: Dict) -> List[str]:
@@ -1543,15 +1640,30 @@ class DatasetCreationPipeline:
             else:
                 current_next_clusters = [int(x) for x in str(next_clusters_str).split('-') if x.strip()]
         
-        # Add y period sequence (target)
+        # Add y period sequence (target) with mutation threshold check
         y_period = window['y']
         if current_next_clusters:
             target_cluster = random.choice(current_next_clusters)
+
+            # Get target sequence with mutation threshold check (same as input sequences)
+            max_mutation_retries = 10
+            retry_count = 0
             target_sequence = self._get_sequence_from_cluster(y_period, target_cluster)
+            previous_sequence = sequences[-1]
+
+            # Retry if target is mutated too much from last input
+            while self._is_mutated_too_much(previous_sequence, target_sequence) and retry_count < max_mutation_retries:
+                # Resample from same cluster to find more similar sequence
+                target_sequence = self._get_sequence_from_cluster(y_period, target_cluster)
+                retry_count += 1
+
+            if retry_count >= max_mutation_retries:
+                raise SequencesMutatedTooMuch()
+
             sequences.append(target_sequence)
         else:
             raise DatasetCreationError(f"No clusters available for target period: {y_period}")
-        
+
         return sequences
     
     def _get_sequence_from_cluster(self, period: str, cluster: int) -> str:
@@ -1867,12 +1979,26 @@ class DatasetCreationPipeline:
         return result_row
     
     def _sequences_similar(self, seq1: List[int], seq2: List[int]) -> bool:
-        """Check if two sequences are similar (have 3 or more matching elements)."""
+        """Check if two sequences are similar using position-wise comparison.
+
+        Compares sequences element-by-element at each position, which is more
+        accurate than set intersection that ignores order and duplicates.
+        """
         if not seq1 or not seq2:
             return True
-        
-        matching_elements = len(set(seq1) & set(seq2))
-        return matching_elements >= 3
+
+        # Sequences must have same length for position-wise comparison
+        if len(seq1) != len(seq2):
+            return False
+
+        # Count position-wise matches
+        matches = sum(1 for a, b in zip(seq1, seq2) if a == b)
+
+        # Use 67% similarity threshold or minimum 2 matches (whichever is larger)
+        # This allows some tolerance for single mutations while catching major changes
+        threshold = max(2, int(len(seq1) * 0.67))
+
+        return matches >= threshold
     
     def _remove_duplicates(self, df: pd.DataFrame) -> tuple[pd.DataFrame, float]:
         """Remove duplicate rows from dataset and return duplicate rate."""
