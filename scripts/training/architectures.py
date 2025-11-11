@@ -25,21 +25,17 @@ class RnnModel(nn.Module):
         self.dropout_rate = config.get('dropout', 0.2)
         
         self.dropout = nn.Dropout(self.dropout_rate)
-        self.encoder = nn.LSTM(input_dim, self.hidden_size, batch_first=True)
-        self.output_layer = nn.Linear(self.hidden_size, output_dim)
+        self.encoder = torch.nn.LSTM(input_dim, self.hidden_size)
+
+        self.out = torch.nn.Linear(self.hidden_size, output_dim)
     
     def forward(self, input_seq: torch.Tensor, hidden_state: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Tuple[torch.Tensor, torch.Tensor]:
         input_seq = self.dropout(input_seq)
         encoder_outputs, _ = self.encoder(input_seq, hidden_state)
-        
-        # Use the last output
-        output = self.output_layer(encoder_outputs[:, -1, :])
-        
-        # Return dummy attention weights for compatibility
-        batch_size, seq_len = input_seq.shape[0], input_seq.shape[1]
-        dummy_attention = torch.zeros(batch_size, seq_len)
-        
-        return output, dummy_attention
+        score_seq = self.out(encoder_outputs[-1, :, :])
+
+        dummy_attn_weights = torch.zeros(input_seq.shape[1], input_seq.shape[0])
+        return score_seq, dummy_attn_weights  # No attention weights
     
     def init_hidden(self, batch_size: int) -> Tuple[torch.Tensor, torch.Tensor]:
         return (torch.zeros(1, batch_size, self.hidden_size),
@@ -57,30 +53,37 @@ class AttentionRnnModel(nn.Module):
         self.dropout_rate = config.get('dropout', 0.2)
         
         self.dropout = nn.Dropout(self.dropout_rate)
-        self.encoder = nn.LSTM(input_dim, self.hidden_size, batch_first=True)
-        
-        # Attention mechanism
-        self.attention = nn.Linear(self.hidden_size, 1)
-        self.output_layer = nn.Linear(self.hidden_size, output_dim)
+        self.encoder = torch.nn.LSTM(input_dim, self.hidden_size)
+
+        # attn auxiliary NNs
+        self.Uattn = torch.nn.Linear(self.hidden_size, self.hidden_size)
+        self.vattn = torch.nn.Linear(self.hidden_size, seq_length)
+
+        # decoder
+        self.out = torch.nn.Linear(self.hidden_size, output_dim)
     
     def forward(self, input_seq: torch.Tensor, hidden_state: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Tuple[torch.Tensor, torch.Tensor]:
-        input_seq = self.dropout(input_seq)
-        
-        # Encoder
-        encoder_outputs, _ = self.encoder(input_seq, hidden_state)
-        
-        # Attention mechanism
-        attention_scores = self.attention(encoder_outputs).squeeze(-1)
-        attention_weights = F.softmax(attention_scores, dim=1)
-        
-        # Apply attention
-        context_vector = torch.sum(encoder_outputs * attention_weights.unsqueeze(-1), dim=1)
-        
-        # Output
-        output = self.output_layer(context_vector)
-        
-        return output, attention_weights
-    
+        x = self.dropout(input_seq)
+        encoder_output, (h_s, c_s) = self.encoder(x, hidden_state)
+
+        attn_applied, weights = self.attention(encoder_output, h_s)
+        score_seq = self.out(attn_applied.reshape(-1, self.hidden_size))
+
+        return score_seq, weights
+
+    def attention(self, encoder_outputs, h_s):
+        # weights = F.softmax(torch.squeeze(self.attn(h_s)), dim=1)
+
+        # attention auxiliary NNs
+        e = self.vattn(torch.tanh((self.Uattn(h_s))))
+        weights = F.softmax(torch.squeeze(e), dim=1)
+        weights = torch.unsqueeze(weights, 1)
+
+        encoder_outputs = encoder_outputs.permute(1, 0, 2)
+        attn_applied = torch.bmm(weights, encoder_outputs)
+
+        return attn_applied, torch.squeeze(weights)
+
     def init_hidden(self, batch_size: int) -> Tuple[torch.Tensor, torch.Tensor]:
         return (torch.zeros(1, batch_size, self.hidden_size),
                 torch.zeros(1, batch_size, self.hidden_size))
