@@ -118,7 +118,7 @@ class DatasetProcessor:
         
         # Convert to numpy array and transpose to get shape: [batch_size, seq_length, feature_dim]
         X = np.array(processed_features)
-        X = np.transpose(X, (0, 1, 2))
+        X = np.transpose(X, (1, 0, 2))
         
         return X
     
@@ -294,22 +294,22 @@ class DatasetProcessor:
         test_mask = np.isin(period_end, test_periods)
 
         # Apply masks to get splits
-        X_train = X[train_mask]
+        X_train = X[:, train_mask, :]
         y_train = y[train_mask]
-        X_val = X[val_mask]
+        X_val = X[:, val_mask, :]
         y_val = y[val_mask]
-        X_test = X[test_mask]
+        X_test = X[:, test_mask, :]
         y_test = y[test_mask]
 
         # Log split information
         logging.info(f"Chronological split sizes: train={len(X_train)}, val={len(X_val)}, test={len(X_test)}")
 
         # Validate minimum samples
-        if len(X_train) < min_samples:
+        if X_train.shape[1] < min_samples:
             logging.warning(f"Training set has only {len(X_train)} samples (minimum: {min_samples})")
-        if len(X_val) < min_samples:
+        if X_val.shape[1] < min_samples:
             logging.warning(f"Validation set has only {len(X_val)} samples (minimum: {min_samples})")
-        if len(X_test) < min_samples:
+        if X_test.shape[1] < min_samples:
             logging.warning(f"Test set has only {len(X_test)} samples (minimum: {min_samples})")
 
         # Log class distribution for each split
@@ -373,13 +373,13 @@ class DatasetProcessor:
     def get_dataset_info(self, X: torch.Tensor) -> Dict[str, int]:
         """Get information about the dataset dimensions."""
         if len(X.shape) >= 3:
-            batch_size, seq_length, input_dim = X.shape[:3]
+            seq_length, batch_size, input_dim = X.shape[:3]
         else:
-            batch_size, seq_length, input_dim = X.shape[0], 1, X.shape[1] if len(X.shape) > 1 else 1
+            seq_length, batch_size, input_dim = 1, X.shape[1], X.shape[0] if len(X.shape) > 1 else 1
         
         return {
-            'batch_size': batch_size,
             'seq_length': seq_length,
+            'batch_size': batch_size,
             'input_dim': input_dim,
             'output_dim': 2  # Binary classification
         }

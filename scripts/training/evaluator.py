@@ -22,6 +22,7 @@ from sklearn.metrics import (
     classification_report
 )
 
+from sklearn.linear_model import LogisticRegression
 
 class ModelEvaluator:
     """Comprehensive model evaluation with all metrics from original code."""
@@ -143,8 +144,7 @@ class ModelEvaluator:
         Compute logistic regression baseline as in original code.
         This matches the original logistic_regression() function.
         """
-        from sklearn.linear_model import LogisticRegression
-        
+
         logging.info("Computing logistic regression baseline...")
         
         # Reshape data to linear format (flatten temporal dimension)
@@ -223,10 +223,11 @@ class ModelEvaluator:
         Reshape temporal data to linear format for logistic regression.
         This matches the original reshape_to_linear() function.
         """
-        # X shape: [batch_size, seq_length, feature_dim]
+        # X shape: [seq_length, batch_size, feature_dim]
         # We want: [batch_size, flattened_features]
 
-        X_np = X.cpu().numpy()
+        X_np = X.permute(1, 0, 2)
+        X_np = X_np.cpu().numpy()
         batch_size, seq_length, feature_dim = X_np.shape
 
         # Take the last window_size timesteps

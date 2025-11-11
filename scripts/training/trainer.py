@@ -61,7 +61,7 @@ class ModelTrainer:
     ) -> Tuple[nn.Module, Dict[str, List[float]]]:
         """Train the model with comprehensive metrics tracking."""
         logging.info("Starting model training with comprehensive metrics...")
-        logging.info(f"Training samples: {X_train.shape[0]}, Validation samples: {y_val.shape[0]}")
+        logging.info(f"Training samples: {X_train.shape[1]}, Validation samples: {y_val.shape[0]}")
         logging.info(f"Epochs: {self.epochs}, Batch size: {self.batch_size}, Learning rate: {self.learning_rate}")
         
         # Setup training components
@@ -69,7 +69,7 @@ class ModelTrainer:
         optimizer = torch.optim.Adam(model.parameters(), lr=self.learning_rate)
 
         # Calculate batching parameters
-        num_examples = X_train.shape[0]
+        num_examples = X_train.shape[1]
         num_batches = math.floor(num_examples / self.batch_size)
 
         # Defensive check: ensure we have enough data for at least one batch
@@ -99,9 +99,9 @@ class ModelTrainer:
         best_model_state = None
         
         # Find a validation batch with mutations for attention plotting
-        plot_batch_size = 10
+        plot_batch_size = X_train.shape[0]
         plot_batch_idx = self._find_mutation_batch(y_val, plot_batch_size)
-        X_plot_batch = X_val[plot_batch_idx:plot_batch_idx + plot_batch_size, :, :]
+        X_plot_batch = X_val[:, plot_batch_idx:plot_batch_idx + plot_batch_size, :]
         y_plot_batch = y_val[plot_batch_idx:plot_batch_idx + plot_batch_size]
         plot_batch_scores = []
         
@@ -193,14 +193,14 @@ class ModelTrainer:
         hidden = model.init_hidden(self.batch_size)
 
         # Batch training loop
-        for start_idx in range(0, X_train.shape[0] - self.batch_size + 1, self.batch_size):
+        for start_idx in range(0, X_train.shape[1] - self.batch_size + 1, self.batch_size):
             end_idx = start_idx + self.batch_size
             
             # Repackage hidden state to detach from history
             hidden = self._repackage_hidden(hidden)
 
             # Get batch
-            X_batch = X_train[start_idx:end_idx, :, :]
+            X_batch = X_train[:, start_idx:end_idx, :]
             y_batch = y_train[start_idx:end_idx]
             
             # Forward pass
