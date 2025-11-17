@@ -34,12 +34,13 @@ class RnnModel(nn.Module):
         encoder_outputs, _ = self.encoder(input_seq, hidden_state)
         score_seq = self.out(encoder_outputs[-1, :, :])
 
-        dummy_attn_weights = torch.zeros(input_seq.shape[1], input_seq.shape[0])
+        dummy_attn_weights = torch.zeros(input_seq.shape[1], input_seq.shape[0], device=input_seq.device)
         return score_seq, dummy_attn_weights  # No attention weights
-    
+
     def init_hidden(self, batch_size: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        return (torch.zeros(1, batch_size, self.hidden_size),
-                torch.zeros(1, batch_size, self.hidden_size))
+        device = next(self.parameters()).device
+        return (torch.zeros(1, batch_size, self.hidden_size, device=device),
+                torch.zeros(1, batch_size, self.hidden_size, device=device))
 
 
 class AttentionRnnModel(nn.Module):
@@ -85,8 +86,9 @@ class AttentionRnnModel(nn.Module):
         return attn_applied, torch.squeeze(weights)
 
     def init_hidden(self, batch_size: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        return (torch.zeros(1, batch_size, self.hidden_size),
-                torch.zeros(1, batch_size, self.hidden_size))
+        device = next(self.parameters()).device
+        return (torch.zeros(1, batch_size, self.hidden_size, device=device),
+                torch.zeros(1, batch_size, self.hidden_size, device=device))
 
 
 class DualAttentionRnnModel(nn.Module):
@@ -160,10 +162,11 @@ class DualAttentionRnnModel(nn.Module):
         c = torch.squeeze(c)
 
         return c, beta
-    
+
     def init_hidden(self, batch_size: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        return (torch.zeros(1, batch_size, self.hidden_size),
-                torch.zeros(1, batch_size, self.hidden_size))
+        device = next(self.parameters()).device
+        return (torch.zeros(1, batch_size, self.hidden_size, device=device),
+                torch.zeros(1, batch_size, self.hidden_size, device=device))
 
 
 def create_model(model_type: str, seq_length: int, input_dim: int, output_dim: int, config: Dict[str, Any]) -> nn.Module:

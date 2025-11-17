@@ -25,29 +25,32 @@ import scripts.utils as utils
 
 class ModelTrainer:
     """Handles model training with comprehensive evaluation metrics."""
-    
-    def __init__(self, config: Dict[str, Any]) -> None:
+
+    def __init__(self, config: Dict[str, Any], device: torch.device = None) -> None:
         """Initialize trainer with configuration."""
         self.config = config
-        
+
         # Extract hyperparameters from config - NO defaults allowed
         if 'learning_rate' not in config:
             raise ValueError("learning_rate must be specified in config")
         if 'batch_size' not in config:
-            raise ValueError("batch_size must be specified in config") 
+            raise ValueError("batch_size must be specified in config")
         if 'epochs' not in config:
             raise ValueError("epochs must be specified in config")
-            
+
         self.learning_rate = config['learning_rate']
         self.batch_size = config['batch_size']
         self.epochs = config['epochs']
-        
+
         # Optional parameters
         self.print_interval = config.get('print_interval', 10)
-        
+
+        # Device for training
+        self.device = device if device is not None else torch.device('cpu')
+
         # Initialize evaluator
-        self.evaluator = ModelEvaluator()
-        
+        self.evaluator = ModelEvaluator(device=self.device)
+
         # Set random seed for reproducibility
         torch.manual_seed(42)
     
@@ -63,6 +66,13 @@ class ModelTrainer:
         logging.info("Starting model training with comprehensive metrics...")
         logging.info(f"Training samples: {X_train.shape[1]}, Validation samples: {y_val.shape[0]}")
         logging.info(f"Epochs: {self.epochs}, Batch size: {self.batch_size}, Learning rate: {self.learning_rate}")
+        logging.info(f"Training on device: {self.device}")
+
+        # Move data to device
+        X_train = X_train.to(self.device)
+        y_train = y_train.to(self.device)
+        X_val = X_val.to(self.device)
+        y_val = y_val.to(self.device)
         
         # Setup training components
         criterion = nn.CrossEntropyLoss()

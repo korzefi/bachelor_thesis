@@ -48,11 +48,17 @@ class ModelTrainingPipeline:
         
         # Validate required config sections
         self._validate_config()
-        
+
+        # Setup device for training
+        self.device = self._setup_device()
+
         # Initialize components
         self.dataset_processor = DatasetProcessor(config)
-        self.trainer = ModelTrainer(self.train_config['hyperparameters'][self.train_config['model_type']])
-        self.evaluator = ModelEvaluator()
+        self.trainer = ModelTrainer(
+            self.train_config['hyperparameters'][self.train_config['model_type']],
+            device=self.device
+        )
+        self.evaluator = ModelEvaluator(device=self.device)
         self.visualizer = TrainingVisualizer(self.results_config['results_dir'])
         
         # Set up base paths (actual paths will be generated dynamically)
@@ -96,7 +102,53 @@ class ModelTrainingPipeline:
         
         if missing_hyperparams:
             raise ValueError(f"Missing required hyperparameters for {model_type}: {missing_hyperparams}")
-    
+
+    def _setup_device(self) -> torch.device:
+        """Setup and validate the computing device based on configuration."""
+        device_config = self.train_config.get('device', 'auto')
+
+        if device_config == 'auto':
+            # Automatic device selection: cuda > mps > cpu
+            if torch.cuda.is_available():
+                device = torch.device('cuda')
+                logging.info(f"Auto-selected device: CUDA (GPU: {torch.cuda.get_device_name(0)})")
+            elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                device = torch.device('mps')
+                logging.info("Auto-selected device: MPS (Apple Metal GPU)")
+            else:
+                device = torch.device('cpu')
+                logging.info("Auto-selected device: CPU (no GPU available)")
+
+        elif device_config == 'cuda':
+            if not torch.cuda.is_available():
+                raise RuntimeError(
+                    "CUDA device requested but not available. "
+                    "Install CUDA-enabled PyTorch or use device='auto' or device='cpu'"
+                )
+            device = torch.device('cuda')
+            logging.info(f"Using CUDA device: {torch.cuda.get_device_name(0)}")
+
+        elif device_config == 'mps':
+            if not (hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()):
+                raise RuntimeError(
+                    "MPS device requested but not available. "
+                    "Requires PyTorch with MPS support on macOS. Use device='auto' or device='cpu'"
+                )
+            device = torch.device('mps')
+            logging.info("Using MPS device (Apple Metal GPU)")
+
+        elif device_config == 'cpu':
+            device = torch.device('cpu')
+            logging.info("Using CPU device (forced by configuration)")
+
+        else:
+            raise ValueError(
+                f"Invalid device configuration: '{device_config}'. "
+                f"Valid options: 'auto', 'cpu', 'cuda', 'mps'"
+            )
+
+        return device
+
     def run(self) -> None:
         """Execute the complete training pipeline."""
         logging.info("="*50)
@@ -193,9 +245,13 @@ class ModelTrainingPipeline:
         # Log model info
         param_count = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        
+
         logging.info(f"Model initialized: {param_count} total parameters, {trainable_params} trainable")
-        
+
+        # Move model to device
+        model = model.to(self.device)
+        logging.info(f"Model moved to device: {self.device}")
+
         return model
     
     def _train_with_flexible_saving(

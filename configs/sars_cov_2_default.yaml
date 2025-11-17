@@ -12,9 +12,9 @@ optimization:
     use_streaming: true
     intermediate_saves: true
     # Batch sizes for different operations
-    data_preparation_batch_size: 5000  # Increased from 1000
-    clustering_batch_size: 1000  # Increased from 500
-    dataset_creation_batch_size: 500  # Increased from 100
+    data_preparation_batch_size: 5000
+    clustering_batch_size: 1000
+    dataset_creation_batch_size: 500
     protvec_batch_size: 50
 
   performance:
@@ -147,7 +147,7 @@ create_dataset:
   ]
   epitopes_similarity_threshold: 0.5
   # Target number of rows in the FINAL dataset (after deduplication)
-  dataset_size: 126800 # Target rows after removing duplicates
+  dataset_size: 1268000 # Target rows after removing duplicates
   # Duplication factor to compensate for high duplicate removal rates
   duplication_factor: 5
   # Expected duplicate rate (0.8 = 80% duplicates expected)
@@ -163,11 +163,11 @@ create_dataset:
 
     # === STOPPING CONDITIONS ===
     # Maximum refilling iterations before stopping
-    max_iterations: 20
+    max_iterations: 60
 
     # Stop if no improvement for this many consecutive iterations
     # This is the ONLY way to exit without meeting both goals
-    no_improvement_max_iterations: 10
+    no_improvement_max_iterations: 20
 
     # === MUTATION RATIO GOAL (MANDATORY) ===
     # Target mutation ratio to achieve (0.2 = 20% mutated samples)
@@ -209,11 +209,19 @@ train:
   # Optional: path to custom model (only used if model_type is 'custom')
   # custom_model_path: "path/to/your/custom_model.pth"
 
+  # Device configuration for training
+  # Options: 'auto', 'cpu', 'cuda', 'mps'
+  # - 'auto': Automatically select best available device (cuda > mps > cpu)
+  # - 'cpu': Force CPU training
+  # - 'cuda': Use NVIDIA GPU (requires CUDA-enabled PyTorch)
+  # - 'mps': Use Apple Metal GPU (requires MPS-enabled PyTorch on macOS)
+  device: 'auto'
+
   # Split strategy: 'random' or 'chronological'
   split_strategy: 'chronological'  # Changed to chronological to prevent data leakage
 
   # Data split ratios: [train, validation, test] - Used for both strategies
-  split_ratio: [0.7, 0.15, 0.15]
+  split_ratio: [0.8, 0.1, 0.1]
 
   # Chronological split configuration (only used when split_strategy is 'chronological')
   chronological_split:
@@ -278,9 +286,9 @@ train:
       print_interval: 10
     
     DualAttentionRNN:
-      hidden_size: 256
+      hidden_size: 128
       dropout: 0.2
       learning_rate: 0.01
       batch_size: 256
-      epochs: 400
-      print_interval: 10
+      epochs: 300
+      print_interval: 5

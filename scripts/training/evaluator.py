@@ -26,10 +26,10 @@ from sklearn.linear_model import LogisticRegression
 
 class ModelEvaluator:
     """Comprehensive model evaluation with all metrics from original code."""
-    
-    def __init__(self) -> None:
+
+    def __init__(self, device: torch.device = None) -> None:
         """Initialize evaluator."""
-        pass
+        self.device = device if device is not None else torch.device('cpu')
     
     def evaluate(self, y_true: torch.Tensor, y_pred: torch.Tensor) -> Tuple[float, float, float, float, float]:
         """
@@ -62,7 +62,7 @@ class ModelEvaluator:
         return accuracy, precision, recall, f1score, mcc
     
     def comprehensive_evaluation(
-        self, 
+        self,
         model: torch.nn.Module,
         X_test: torch.Tensor,
         y_test: torch.Tensor
@@ -72,9 +72,13 @@ class ModelEvaluator:
         This replaces the original test_model() function with enhanced functionality.
         """
         logging.info("Performing comprehensive model evaluation...")
-        
+
+        # Move data to device
+        X_test = X_test.to(self.device)
+        y_test = y_test.to(self.device)
+
         model.eval()
-        
+
         with torch.no_grad():
             # Get predictions
             hidden = model.init_hidden(y_test.shape[0])
