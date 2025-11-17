@@ -1,7 +1,3 @@
-# General project settings
-project_name: "SARS-CoV-2-Spike-Mutation"
-protein_name: "SARS-CoV-2 Spike"
-
 # --- OPTIMIZATION SETTINGS ---
 optimization:
   memory:
@@ -20,7 +16,6 @@ optimization:
   performance:
     use_multiprocessing: true
     # n_workers determined automatically using cpu_count()
-    cache_enabled: true
 
   algorithms:
     use_approximate_nn: false  # Set true for very large datasets
