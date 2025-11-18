@@ -281,9 +281,9 @@ train:
       print_interval: 10
     
     DualAttentionRNN:
-      hidden_size: 128
+      hidden_size: 256
       dropout: 0.2
-      learning_rate: 0.01
-      batch_size: 256
+      learning_rate: 0.001
+      batch_size: 128
       epochs: 300
       print_interval: 5

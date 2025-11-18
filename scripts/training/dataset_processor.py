@@ -183,9 +183,14 @@ class DatasetProcessor:
 
         logging.info(f"Random split ratios: {train_ratio:.1f}/{val_ratio:.1f}/{test_ratio:.1f}")
 
+        # sklearn's train_test_split expects first dimension to be batch_size
+        # But X comes from _process_features with shape [seq_length, batch_size, feature_dim]
+        # Transpose to [batch_size, seq_length, feature_dim] for sklearn
+        X_sklearn = np.transpose(X, (1, 0, 2))
+
         # First split: train vs (val + test)
-        X_train, X_temp, y_train, y_temp = train_test_split(
-            X, y,
+        X_train_sk, X_temp_sk, y_train, y_temp = train_test_split(
+            X_sklearn, y,
             test_size=(val_ratio + test_ratio),
             stratify=y,
             random_state=42
@@ -194,17 +199,23 @@ class DatasetProcessor:
         # Second split: val vs test
         if test_ratio > 0:
             relative_test_size = test_ratio / (val_ratio + test_ratio)
-            X_val, X_test, y_val, y_test = train_test_split(
-                X_temp, y_temp,
+            X_val_sk, X_test_sk, y_val, y_test = train_test_split(
+                X_temp_sk, y_temp,
                 test_size=relative_test_size,
                 stratify=y_temp,
                 random_state=42
             )
         else:
-            X_val, X_test = X_temp, np.array([])
+            X_val_sk, X_test_sk = X_temp_sk, np.array([])
             y_val, y_test = y_temp, np.array([])
 
-        logging.info(f"Split sizes: train={len(X_train)}, val={len(X_val)}, test={len(X_test)}")
+        # Transpose back to [seq_length, batch_size, feature_dim] for PyTorch RNN models
+        # This matches the shape from chronological split
+        X_train = np.transpose(X_train_sk, (1, 0, 2))
+        X_val = np.transpose(X_val_sk, (1, 0, 2))
+        X_test = np.transpose(X_test_sk, (1, 0, 2)) if len(X_test_sk) > 0 else np.array([])
+
+        logging.info(f"Split sizes: train={len(y_train)}, val={len(y_val)}, test={len(y_test)}")
 
         # Convert to torch tensors
         X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
