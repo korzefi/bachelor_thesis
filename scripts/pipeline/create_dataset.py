@@ -417,7 +417,8 @@ class SequenceCache:
         total_clusters = 0
 
         for period_file in period_files:
-            period_name = period_file.replace('.csv', '')
+            # period_name = int(period_file.replace('.csv', ''))  # Convert to int to match centroids DataFrame type
+            period_name = period_file.replace('.csv', '')  # Convert to int to match centroids DataFrame type
             file_path = os.path.join(self.periods_dir, period_file)
 
             try:
@@ -841,6 +842,21 @@ class DatasetCreationPipeline:
         # Share ProtVec lookup with batch processor
         self.batch_dataset_processor.triplet_to_index = self.triplet_to_index
 
+        # Determine expected period gap for consecutive period validation
+        prepare_config = config.get('prepare', {})
+        sort_periods_config = prepare_config.get('sort_periods', {})
+        division_technique = sort_periods_config.get('division_technique', 'month')
+
+        # Set expected gap based on division technique
+        if division_technique == 'year':
+            self.expected_period_gap = 1  # 1 year between consecutive periods
+        elif division_technique == 'month':
+            self.expected_period_gap = None  # Month-based periods use string comparison (already consecutive)
+        else:
+            self.expected_period_gap = 1  # Default to 1 unit gap
+
+        logging.info(f"Period validation: division_technique='{division_technique}', expected_gap={self.expected_period_gap}")
+
         # Create output directory
         self._create_output_directory()
     
@@ -1231,36 +1247,89 @@ class DatasetCreationPipeline:
         """Load linked cluster centroids."""
         if not Path(self.linked_centroids_file).exists():
             raise FileNotFoundError(f"Linked centroids file not found: {self.linked_centroids_file}")
-        
+
         logging.info(f"Loading linked centroids from: {self.linked_centroids_file}")
         return pd.read_csv(self.linked_centroids_file)
-    
+
+    def _validate_consecutive_periods(self, periods: List, expected_gap: int = None) -> bool:
+        """Validate that periods have consistent gaps.
+
+        Args:
+            periods: List of period values (int for years, str for months)
+            expected_gap: Expected gap between consecutive periods (None for string-based periods)
+
+        Returns:
+            True if all gaps match expected_gap (or if string-based), False otherwise
+        """
+        if len(periods) < 2:
+            return True
+
+        # For month-based periods (strings like "2020-01"), skip validation
+        # They're already consecutive by construction in COVID data
+        if expected_gap is None or isinstance(periods[0], str):
+            return True
+
+        # For year-based periods (influenza), validate numeric gaps
+        for i in range(len(periods) - 1):
+            actual_gap = periods[i + 1] - periods[i]
+            if actual_gap != expected_gap:
+                return False
+
+        return True
+
     def _create_sliding_windows(self, centroids_df: pd.DataFrame) -> List[Dict]:
         """Create sliding windows from consecutive periods."""
         periods = centroids_df['period'].unique()
         sorted_periods = natsorted(periods)
         
         logging.info(f"Creating sliding windows from {len(sorted_periods)} periods")
-        
+        logging.info(f"Available periods: {sorted_periods[:15]}{'...' if len(sorted_periods) > 15 else ''}")
+
         # Adjust window size if needed
         actual_window_size = self.window_size
         if len(sorted_periods) < actual_window_size + 1:  # +1 for y period
             logging.warning(f"Not enough periods ({len(sorted_periods)}) for window size {self.window_size}")
             actual_window_size = len(sorted_periods) - 1
             logging.warning(f"Adjusted window size to {actual_window_size}")
-        
-        # Create windows
+
+        # Create windows with consecutive period validation
         windows = []
+        skipped_count = 0
         num_windows = len(sorted_periods) - actual_window_size
-        
+
         for i in range(num_windows):
-            window = {
-                'x': sorted_periods[i:i + actual_window_size],
-                'y': sorted_periods[i + actual_window_size]
-            }
-            windows.append(window)
-        
-        logging.info(f"Created {len(windows)} sliding windows")
+            # Create candidate window (include y period for validation)
+            window_periods = sorted_periods[i:i + actual_window_size + 1]  # +1 for y period
+
+            # Validate consecutive periods with equal gaps
+            if self._validate_consecutive_periods(window_periods, expected_gap=self.expected_period_gap):
+                window = {
+                    'x': window_periods[:-1],  # Input periods
+                    'y': window_periods[-1]     # Target period
+                }
+                windows.append(window)
+            else:
+                skipped_count += 1
+                # Log first few skipped windows for debugging
+                if skipped_count <= 5:
+                    gaps = [window_periods[j + 1] - window_periods[j] for j in range(len(window_periods) - 1)]
+                    logging.debug(f"Skipped window starting at {sorted_periods[i]}: periods={window_periods[:5]}..., gaps={gaps}")
+
+        # Summary logging
+        if skipped_count > 0:
+            logging.warning(f"Skipped {skipped_count}/{num_windows} windows due to non-consecutive periods")
+            logging.warning(f"Windows with valid consecutive periods: {len(windows)}")
+
+        logging.info(f"Created {len(windows)} valid sliding windows (skipped {skipped_count} invalid)")
+
+        # Ensure we have at least some windows
+        if len(windows) == 0:
+            raise DatasetCreationError(
+                f"No valid consecutive windows could be created from {len(sorted_periods)} periods. "
+                f"Dataset has too many gaps in temporal coverage. "
+                f"All {num_windows} candidate windows had non-consecutive periods."
+            )
+
         return windows
     
     def _create_sequence_samples(self, centroids_df: pd.DataFrame, windows: List[Dict]) -> Tuple[List[List[str]], List[Dict]]:

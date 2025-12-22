@@ -1,3 +1,49 @@
+# --- DATA FORMAT SPECIFICATION ---
+# Configure this section to match your virus FASTA file format
+# This configuration is for SARS-CoV-2 spike protein sequences
+data_format:
+  # Header parsing configuration
+  fasta_header:
+    # Parsing method: 'delimiter' or 'regex'
+    method: 'delimiter'
+
+    # Delimiter used to separate fields in FASTA headers
+    delimiter: '|'
+
+    # Field mapping: map position (after delimiter split) to semantic meaning
+    fields:
+      gene: 0           # Position of gene/protein name
+      isolate: 1        # Position of isolate/strain name
+      timestamp: 2      # Position of date/timestamp
+      accession: 3      # Position of accession or other ID
+
+  # Timestamp/date parsing
+  date_format:
+    # Input format: how dates appear in your FASTA file
+    # Options: 'YYYY-MM-DD', 'YYYY-MM', 'YYYY', or strftime pattern
+    input_format: 'YYYY-MM-DD'
+
+    # Default values for missing date components
+    defaults:
+      month: '01'  # Default month if not specified
+      day: '01'    # Default day if not specified
+
+    # Period grouping: how to group sequences by time
+    # Options: 'year', 'quarter', 'month', 'week'
+    grouping: 'month'
+
+  # Sequence validation and filtering
+  sequence_validation:
+    # Require sequences to end with stop codon '*'
+    require_stop_codon: true
+
+    # Filter out sequences with ambiguous amino acids (X, B, Z, J)
+    filter_ambiguous: true
+    ambiguous_threshold: 0.0  # Max proportion of ambiguous residues (0.0 = none allowed)
+
+    # Expected sequence type
+    sequence_type: 'amino_acid'
+
 # --- OPTIMIZATION SETTINGS ---
 optimization:
   memory:
@@ -47,6 +93,7 @@ error_handling:
 # --- PATHS ---
 data:
   raw_fasta_file: "data/input/spikeprot0723.fasta"
+#  raw_fasta_file: "data/input/influenza_ha_h1n1.fasta"  # Example: switch to influenza
   prot_vec_file: "data/input/protVec_100d_3grams.csv"
   # Intermediate paths
   temp_fasta_dir: "data/processed/temp_fasta"
@@ -55,10 +102,10 @@ data:
   periods_unique_dir: "data/processed/periods/unique"
   vector_temp_dir: "data/processed/sequences_as_vectors"
   # Output paths
-  centroids_file: "data/processed/clusters_centroids.csv"
-  linked_centroids_file: "data/processed/linked_clusters_centroids.csv"
+  centroids_file: "data/processed/covid_clusters_centroids.csv"
+  linked_centroids_file: "data/processed/covid_linked_clusters_centroids.csv"
   final_dataset_dir: "data/processed/datasets"
-  final_dataset_file: "data/processed/final_dataset.csv"
+  final_dataset_file: "data/processed/final_dataset_covid.csv"
 
 models:
   model_dir: "models"
@@ -78,12 +125,11 @@ prepare:
     start_line: 1  # Start line for processing (allows resuming from specific position)
     lines_per_file: 10000
     max_files: 10
-  # Configurable FASTA filename prefix (replaces hardcoded 'spikeprot_batch_data')
-  fasta_prefix: "spikeprot_batch_data"
+  # Configurable FASTA filename prefix
+  fasta_prefix: "batch_data"
   clean_sequences:
-    # Set to null for auto-detection, or specify exact length for manual mode
-#    expected_len: null  # Auto-detect from data (was: 1273)
-    expected_len: 1273  # Auto-detect from data (was: 1273)
+    # Expected sequence length (in amino acids)
+    expected_len: 1273  # SARS-CoV-2 Spike protein length
     # Error margin for length filtering (used with expected_len or auto-detection)
     error_margin: 13
   sort_periods:
@@ -96,7 +142,7 @@ cluster:
   
   # Automatic k-selection using Silhouette Score
   auto_k_selection:
-    enabled: false
+    enabled: true
     min_k: 2
     max_k: 19
   
@@ -135,6 +181,7 @@ cluster:
 create_dataset:
   window_size: 10
   context_size: 2
+  # SARS-CoV-2 Spike protein epitopes
   epitopes: [
     [194, 210], [291, 325], [307, 323], [371, 387], [410, 426], [525, 566],
     [530, 544], [722, 739], [747, 763], [749, 771], [754, 770], [891, 906],
@@ -142,7 +189,7 @@ create_dataset:
   ]
   epitopes_similarity_threshold: 0.5
   # Target number of rows in the FINAL dataset (after deduplication)
-  dataset_size: 1268000 # Target rows after removing duplicates
+  dataset_size: 12680 # Target rows after removing duplicates
   # Duplication factor to compensate for high duplicate removal rates
   duplication_factor: 5
   # Expected duplicate rate (0.8 = 80% duplicates expected)
@@ -158,11 +205,11 @@ create_dataset:
 
     # === STOPPING CONDITIONS ===
     # Maximum refilling iterations before stopping
-    max_iterations: 60
+    max_iterations: 10
 
     # Stop if no improvement for this many consecutive iterations
     # This is the ONLY way to exit without meeting both goals
-    no_improvement_max_iterations: 20
+    no_improvement_max_iterations: 3
 
     # === MUTATION RATIO GOAL (MANDATORY) ===
     # Target mutation ratio to achieve (0.2 = 20% mutated samples)
@@ -285,5 +332,5 @@ train:
       dropout: 0.2
       learning_rate: 0.001
       batch_size: 128
-      epochs: 300
+      epochs: 100
       print_interval: 5

@@ -20,9 +20,10 @@ import numpy as np
 import logging
 import random
 import json
+import re
 from pathlib import Path
 from natsort import natsorted
-from typing import Dict, List
+from typing import Dict, List, Any
 from datetime import datetime
 
 import scripts.utils as utils
@@ -39,6 +40,9 @@ class DataPreparationPipeline:
         self.data_config = config['data']
         self.prepare_config = config['prepare']
         self.error_config = config.get('error_handling', {})
+
+        # Validate and set defaults for data format configuration
+        self._validate_config()
 
         # Validate required input files exist
         logging.info("Validating required input files for data preparation...")
@@ -87,7 +91,84 @@ class DataPreparationPipeline:
         for dir_path in dirs_to_create:
             utils.create_dir(dir_path)
             logging.debug(f"Created directory: {dir_path}")
-    
+
+    def _validate_config(self) -> None:
+        """Validate configuration and provide backward compatibility with defaults."""
+
+        # Check if data_format section exists (new generic format)
+        if 'data_format' not in self.config:
+            logging.warning("No 'data_format' section in config - using SARS-CoV-2 defaults for backward compatibility")
+
+            # Set defaults for SARS-CoV-2 format (backward compatibility)
+            self.config['data_format'] = {
+                'fasta_header': {
+                    'method': 'delimiter',
+                    'delimiter': '|',
+                    'fields': {
+                        'gene': 0,
+                        'isolate': 1,
+                        'timestamp': 2,
+                        'accession': 3
+                    }
+                },
+                'date_format': {
+                    'input_format': 'YYYY-MM-DD',
+                    'defaults': {
+                        'month': '01',
+                        'day': '01'
+                    },
+                    'grouping': 'month'
+                },
+                'sequence_validation': {
+                    'require_stop_codon': True,
+                    'filter_ambiguous': True,
+                    'ambiguous_threshold': 0.0,
+                    'sequence_type': 'amino_acid'
+                }
+            }
+
+        # Validate header parsing config
+        header_config = self.config['data_format'].get('fasta_header', {})
+        method = header_config.get('method', 'delimiter')
+
+        if method == 'delimiter':
+            if 'delimiter' not in header_config:
+                raise ValueError("data_format.fasta_header.method='delimiter' requires 'delimiter' to be specified")
+            if 'fields' not in header_config:
+                logging.warning("No field mapping specified, using default SARS-CoV-2 field positions")
+                header_config['fields'] = {'gene': 0, 'isolate': 1, 'timestamp': 2, 'accession': 3}
+
+        elif method == 'regex':
+            if 'pattern' not in header_config:
+                raise ValueError("data_format.fasta_header.method='regex' requires 'pattern' to be specified")
+
+        else:
+            raise ValueError(f"Unknown header parsing method: {method}. Must be 'delimiter' or 'regex'")
+
+        # Validate date format config
+        date_config = self.config['data_format'].get('date_format', {})
+        if 'input_format' not in date_config:
+            logging.warning("No date_format.input_format specified, using 'YYYY-MM-DD'")
+            date_config['input_format'] = 'YYYY-MM-DD'
+
+        # Ensure defaults exist
+        if 'defaults' not in date_config:
+            date_config['defaults'] = {'month': '01', 'day': '01'}
+
+        # Validate sequence validation config
+        validation_config = self.config['data_format'].get('sequence_validation', {})
+        if 'require_stop_codon' not in validation_config:
+            validation_config['require_stop_codon'] = True
+        if 'filter_ambiguous' not in validation_config:
+            validation_config['filter_ambiguous'] = True
+        if 'ambiguous_threshold' not in validation_config:
+            validation_config['ambiguous_threshold'] = 0.0
+
+        logging.info("✓ Configuration validated successfully")
+        logging.info(f"  Header parsing method: {method}")
+        logging.info(f"  Date format: {date_config.get('input_format')}")
+        logging.info(f"  Require stop codon: {validation_config.get('require_stop_codon')}")
+
     def run(self) -> None:
         """Execute the complete data preparation pipeline with checkpoint support."""
         logging.info("Starting data preparation pipeline...")
@@ -1204,58 +1285,184 @@ class DataPreparationPipeline:
         return df
     
     def _filter_by_length(self, df: pd.DataFrame, min_len: int, max_len: int) -> pd.DataFrame:
-        """Filter sequences by length."""
-        # Must end with stop codon '*'
-        df = df[df['sequence'].str.endswith('*')]
-        
+        """Filter sequences by length and validation rules from configuration."""
+
+        # Get sequence validation configuration
+        validation_config = self.config.get('data_format', {}).get('sequence_validation', {})
+        require_stop_codon = validation_config.get('require_stop_codon', True)
+        filter_ambiguous = validation_config.get('filter_ambiguous', True)
+        ambiguous_threshold = validation_config.get('ambiguous_threshold', 0.0)
+
+        original_count = len(df)
+
+        # Filter by stop codon if required
+        if require_stop_codon:
+            df = df[df['sequence'].str.endswith('*')]
+            logging.info(f"Stop codon filter: {len(df)}/{original_count} retained ({len(df)/original_count*100:.1f}%)")
+        else:
+            logging.info(f"Stop codon filter: DISABLED")
+
+        # Filter ambiguous amino acids if required
+        if filter_ambiguous:
+            before_filter = len(df)
+
+            def has_acceptable_ambiguity(seq):
+                if len(seq) == 0:
+                    return False
+                ambiguous_chars = sum(1 for c in seq if c in 'XBZJ')
+                return (ambiguous_chars / len(seq)) <= ambiguous_threshold
+
+            df = df[df['sequence'].apply(has_acceptable_ambiguity)]
+            if before_filter > 0:
+                logging.info(f"Ambiguous residue filter (<={ambiguous_threshold*100:.1f}%): "
+                           f"{len(df)}/{before_filter} retained ({len(df)/before_filter*100:.1f}%)")
+
         # Filter by length
+        before_filter = len(df)
         df = df[(df['sequence'].str.len() >= min_len) & (df['sequence'].str.len() <= max_len)]
-        
+        if before_filter > 0:
+            logging.info(f"Length filter [{min_len}-{max_len}]: "
+                       f"{len(df)}/{before_filter} retained ({len(df)/before_filter*100:.1f}%)")
+
         return df
     
     def _has_parsed_description(self, df: pd.DataFrame) -> bool:
         """Check if description has already been parsed into isolate_name and timestamp columns."""
         return 'isolate_name' in df.columns and 'timestamp' in df.columns
 
-    def _parse_and_filter_description(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Parse description field and extract relevant information."""
-        # Split description: gene|isolate_name|timestamp|rest
-        splitted_desc = df['description'].str.split(pat='|', expand=True, n=3)
-        splitted_desc.columns = ['gene', 'isolate_name', 'timestamp', 'rest']
+    def _normalize_timestamp(self, timestamp_str: str) -> str:
+        """Normalize timestamp to YYYY-MM-DD format based on config."""
+        if not timestamp_str or pd.isna(timestamp_str):
+            return ''
 
-        # Keep only isolate_name and timestamp
-        splitted_desc = splitted_desc[['isolate_name', 'timestamp']].copy()
+        timestamp_str = str(timestamp_str).strip()
 
-        # Adapt day format (add 1 day) with proper date arithmetic
+        # Get date format configuration
+        date_config = self.config.get('data_format', {}).get('date_format', {})
+        input_format = date_config.get('input_format', 'YYYY-MM-DD')
+        defaults = date_config.get('defaults', {'month': '01', 'day': '01'})
+
         try:
-            # First, ensure zero-padding for consistent parsing
-            fixed_timestamps = self._validate_and_fix_timestamps(splitted_desc['timestamp'])
+            # Handle common formats
+            if input_format == 'YYYY-MM-DD':
+                # Already in correct format, just validate
+                if re.match(r'^\d{4}-\d{2}-\d{2}$', timestamp_str):
+                    return timestamp_str
+                # Try to parse and reformat if close
+                match = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})$', timestamp_str)
+                if match:
+                    year, month, day = match.groups()
+                    return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
 
-            # Convert to datetime, add 1 day, then back to string format
-            timestamps_dt = pd.to_datetime(fixed_timestamps, format='%Y-%m-%d', errors='coerce')
+            elif input_format == 'YYYY-MM':
+                # Add default day
+                if re.match(r'^\d{4}-\d{2}$', timestamp_str):
+                    return f"{timestamp_str}-{defaults['day']}"
+                # Handle without dash
+                match = re.match(r'^(\d{4})(\d{2})$', timestamp_str)
+                if match:
+                    return f"{match.group(1)}-{match.group(2)}-{defaults['day']}"
 
-            # Add 1 day using proper date arithmetic
-            timestamps_dt = timestamps_dt + pd.Timedelta(days=1)
+            elif input_format == 'YYYY':
+                # Add default month and day
+                if re.match(r'^\d{4}$', timestamp_str):
+                    return f"{timestamp_str}-{defaults['month']}-{defaults['day']}"
+                # Handle formats like "1988//" or "1988 " or "1988-01-01" (extract year)
+                year_match = re.match(r'^(\d{4})', timestamp_str)
+                if year_match:
+                    return f"{year_match.group(1)}-{defaults['month']}-{defaults['day']}"
 
-            # Convert back to string format
-            splitted_desc['timestamp'] = timestamps_dt.dt.strftime('%Y-%m-%d')
+            # Try parsing with strftime pattern if specified
+            elif '%' in input_format:
+                from datetime import datetime as dt
+                parsed_date = dt.strptime(timestamp_str, input_format)
+                return parsed_date.strftime('%Y-%m-%d')
 
-            # Handle any NaT values that couldn't be parsed
-            invalid_count = splitted_desc['timestamp'].isna().sum()
-            if invalid_count > 0:
-                logging.warning(f"Could not parse {invalid_count} timestamps in description parsing, keeping original values")
-                # For invalid timestamps, keep the original fixed format without adding 1 day
-                mask = timestamps_dt.isna()
-                splitted_desc.loc[mask, 'timestamp'] = fixed_timestamps[mask]
+            # If no format matched, log warning and return empty
+            logging.debug(f"Could not parse timestamp: '{timestamp_str}' with format '{input_format}'")
+            return ''
 
         except Exception as e:
-            logging.warning(f"Error processing timestamps in description parsing: {e}")
-            # Keep original timestamps if processing fails
-            pass
+            logging.debug(f"Error parsing timestamp '{timestamp_str}': {e}")
+            return ''
 
-        # Replace description with parsed fields
-        df = df.drop(columns=['description'])
-        df = pd.concat([splitted_desc, df], axis=1, join='inner')
+    def _parse_and_filter_description(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Parse description field and extract relevant information using configured format."""
+
+        # Get data format configuration
+        header_config = self.config.get('data_format', {}).get('fasta_header', {})
+        method = header_config.get('method', 'delimiter')
+
+        logging.info(f"Parsing FASTA headers using method: {method}")
+
+        if method == 'delimiter':
+            # Delimiter-based parsing (e.g., SARS-CoV-2)
+            delimiter = header_config.get('delimiter', '|')
+            fields = header_config.get('fields', {})
+
+            # Split by delimiter
+            max_splits = max(fields.values()) if fields else 3
+            try:
+                splitted_desc = df['description'].str.split(pat=delimiter, expand=True, n=max_splits)
+
+                # Map fields to columns
+                df['gene'] = splitted_desc[fields.get('gene', 0)] if 'gene' in fields else ''
+                df['isolate_name'] = splitted_desc[fields.get('isolate', 1)] if 'isolate' in fields else ''
+                df['timestamp'] = splitted_desc[fields.get('timestamp', 2)] if 'timestamp' in fields else ''
+
+            except Exception as e:
+                logging.error(f"Error splitting description by delimiter '{delimiter}': {e}")
+                logging.error(f"Sample description: {df['description'].iloc[0] if len(df) > 0 else 'N/A'}")
+                raise ValueError(f"Failed to parse headers with delimiter '{delimiter}'. "
+                               f"Check that your FASTA headers match the configured format.")
+
+        elif method == 'regex':
+            # Regex-based parsing (e.g., influenza)
+            pattern = header_config.get('pattern', '')
+
+            def parse_with_regex(desc):
+                match = re.match(pattern, desc)
+                if match:
+                    groups = match.groupdict()
+                    return pd.Series({
+                        'gene': groups.get('gene', ''),
+                        'isolate_name': groups.get('isolate', ''),
+                        'timestamp': groups.get('timestamp', '')
+                    })
+                return pd.Series({'gene': '', 'isolate_name': '', 'timestamp': ''})
+
+            try:
+                parsed = df['description'].apply(parse_with_regex)
+                df['gene'] = parsed['gene']
+                df['isolate_name'] = parsed['isolate_name']
+                df['timestamp'] = parsed['timestamp']
+            except Exception as e:
+                logging.error(f"Error parsing description with regex '{pattern}': {e}")
+                logging.error(f"Sample description: {df['description'].iloc[0] if len(df) > 0 else 'N/A'}")
+                raise ValueError(f"Failed to parse headers with regex pattern. "
+                               f"Check that your pattern matches your FASTA headers.")
+
+        else:
+            raise ValueError(f"Unknown header parsing method: {method}")
+
+        # Normalize timestamps to YYYY-MM-DD format
+        logging.info(f"Normalizing {len(df)} timestamps...")
+        df['timestamp'] = df['timestamp'].apply(self._normalize_timestamp)
+
+        # Filter out rows with empty timestamps
+        before_filter = len(df)
+        df = df[df['timestamp'].notna() & (df['timestamp'] != '')]
+        after_filter = len(df)
+
+        if before_filter > after_filter:
+            logging.warning(f"Filtered out {before_filter - after_filter} sequences with invalid timestamps "
+                          f"({(before_filter - after_filter) / before_filter * 100:.1f}%)")
+
+        # Drop the original description column
+        if 'description' in df.columns:
+            df = df.drop(columns=['description'])
+
+        logging.info(f"Description parsing complete: {len(df)} sequences with valid data")
 
         return df
     
