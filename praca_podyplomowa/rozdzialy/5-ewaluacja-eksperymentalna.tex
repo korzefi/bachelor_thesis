@@ -1,5 +1,279 @@
 \newpage % Rozdziały zaczynamy od nowej strony.
 \section{Wyniki ewaluacji eksperymentalnej}
 
+Niniejszy rozdział przedstawia wyniki eksperymentalnej ewaluacji zaproponowanego frameworku do predykcji mutacji aminokwasowych w białkach wirusowych. Celem przeprowadzonych eksperymentów było zbadanie skuteczności trzech architektur modeli opartych na sieciach LSTM w~zadaniu klasyfikacji binarnej pozycji aminokwasowych jako ulegających bądź nieulegających mutacji. Ewaluację przeprowadzono na dwóch zbiorach danych --- sekwencjach białka S wirusa SARS-CoV-2 oraz białka hemagglutyniny (HA) wirusa Influenza A podtypu H1N1 --- co pozwoliło zweryfikować zdolność frameworku do generalizacji między różnymi patogenami wirusowymi.
 
+%--------------------------------------
+\subsection{Środowisko eksperymentalne}
+%--------------------------------------
 
+Wszystkie eksperymenty przeprowadzono w~zunifikowanym środowisku obliczeniowym w~celu zapewnienia powtarzalności wyników. Konfiguracja sprzętowa i~programowa została zestawiona w~tabeli~\ref{tab:env}.
+
+\begin{table}[H]
+    \centering
+    \caption{Konfiguracja środowiska eksperymentalnego.}
+    \label{tab:env}
+    \begin{tabular}{ll}
+        \toprule
+        \textbf{Parametr} & \textbf{Wartość} \\
+        \midrule
+        Procesor graficzny     & % TODO: np. NVIDIA RTX 3090 / Apple M1 Pro \\
+        Pamięć RAM             & % TODO: np. 32 GB \\
+        System operacyjny      & Ubuntu 20.04 (Docker) \\
+        Język programowania    & Python 3.x \\
+        Framework ML           & PyTorch~\cite{paszke2019pytorch} \\
+        Biblioteka ML          & scikit-learn~\cite{pedregosa2011sklearn} \\
+        Ziarno losowości       & 42 \\
+        Format konfiguracji    & YAML \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+W~celu zapewnienia reprodukowalności wyników zastosowano stałe ziarno losowości (\textit{random seed}) o~wartości 42, które inicjalizowało generatory liczb pseudolosowych w~bibliotekach PyTorch, NumPy oraz wbudowanym module \texttt{random} języka Python. Konfiguracja każdego eksperymentu została zapisana w~pliku YAML, co umożliwia dokładne odtworzenie warunków eksperymentalnych.
+
+%--------------------------------------
+\subsection{Zbiory danych}
+%--------------------------------------
+
+Ewaluację przeprowadzono na dwóch zbiorach danych, różniących się źródłem, rozmiarem oraz granularnością podziału czasowego. Szczegółowe porównanie parametrów obu zbiorów przedstawiono w~tabeli~\ref{tab:datasets}.
+
+\begin{table}[H]
+    \centering
+    \caption{Porównanie zbiorów danych wykorzystanych w~eksperymentach.}
+    \label{tab:datasets}
+    \begin{tabular}{lcc}
+        \toprule
+        \textbf{Parametr} & \textbf{SARS-CoV-2 Spike} & \textbf{Influenza A H1N1 HA} \\
+        \midrule
+        Źródło danych          & GISAID~\cite{elbe2017gisaid}  & NCBI~\cite{bao2008ncbi} \\
+        Białko                 & Spike (S)                     & Hemagglutynina (HA) \\
+        Długość sekwencji      & 1273 aa                       & 565 aa \\
+        Liczba epitopów        & 16 regionów (317 poz.)        & 5 miejsc (95 poz.) \\
+        Granularność czasowa   & Miesięczna                    & Roczna \\
+        Rozmiar zbioru         & $\sim$12\,680 próbek          & $\sim$40\,000 próbek \\
+        Okno czasowe           & 10 miesięcy                   & 10 lat \\
+        Stosunek mutacji       & $\sim$20\%                    & $\sim$20\% \\
+        Podział train/val/test & 80\%\,/\,10\%\,/\,10\%       & 80\%\,/\,10\%\,/\,10\% \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Oba zbiory danych zostały przygotowane z~wykorzystaniem tego samego potoku przetwarzania, obejmującego: filtrowanie sekwencji, kodowanie metodą ProtVec~\cite{asgari2015protvec}, klasteryzację algorytmem K-means~\cite{macqueen1967kmeans} w~ramach poszczególnych okresów czasowych, łączenie klastrów między kolejnymi okresami na podstawie odległości centroidów oraz generowanie próbek treningowych przy użyciu okna przesuwnego. Podział na zbiór treningowy, walidacyjny i~testowy został przeprowadzony chronologicznie --- zbiór testowy obejmuje najnowsze okresy czasowe, co odzwierciedla rzeczywisty scenariusz predykcji przyszłych mutacji.
+
+%--------------------------------------
+\subsection{Metryki ewaluacji}
+%--------------------------------------
+
+Ze względu na niezbalansowany charakter zadania klasyfikacji binarnej (stosunek klas mutacja/brak mutacji wynosi około 20\%/80\%) zastosowano zestaw metryk uwzględniających tę asymetrię. Oprócz standardowej dokładności (ang.~\textit{accuracy}) wykorzystano następujące miary:
+
+\begin{itemize}
+    \item \textbf{Precyzja} (ang.~\textit{precision}) --- stosunek prawidłowo przewidzianych mutacji do~wszystkich przewidzianych mutacji:
+    \begin{equation}
+        \text{Precision} = \frac{TP}{TP + FP}
+        \label{eq:precision}
+    \end{equation}
+
+    \item \textbf{Czułość} (ang.~\textit{recall}) --- stosunek prawidłowo przewidzianych mutacji do~wszystkich rzeczywistych mutacji:
+    \begin{equation}
+        \text{Recall} = \frac{TP}{TP + FN}
+        \label{eq:recall}
+    \end{equation}
+
+    \item \textbf{Miara F1} (ang.~\textit{F1 score}) --- średnia harmoniczna precyzji i~czułości:
+    \begin{equation}
+        F_1 = 2 \cdot \frac{\text{Precision} \cdot \text{Recall}}{\text{Precision} + \text{Recall}}
+        \label{eq:f1}
+    \end{equation}
+
+    \item \textbf{Współczynnik korelacji Matthewsa} (ang.~\textit{Matthews Correlation Coefficient}, MCC)~\cite{matthews1975mcc} --- miara jakości klasyfikacji binarnej uwzględniająca wszystkie elementy macierzy pomyłek:
+    \begin{equation}
+        \text{MCC} = \frac{TP \cdot TN - FP \cdot FN}{\sqrt{(TP+FP)(TP+FN)(TN+FP)(TN+FN)}}
+        \label{eq:mcc-eval}
+    \end{equation}
+
+    \item \textbf{Pole pod krzywą ROC} (ang.~\textit{ROC-AUC}) --- miara zdolności modelu do~rozróżniania klas niezależnie od~progu decyzyjnego.
+\end{itemize}
+
+Współczynnik MCC przyjmuje wartości z~przedziału $[-1, 1]$, gdzie $1$ oznacza idealną klasyfikację, $0$ --- klasyfikację na poziomie losowym, a~$-1$ --- klasyfikację całkowicie odwrotną. Jak wykazali Chicco i~Jurman~\cite{chicco2020mcc}, MCC stanowi bardziej wiarygodną miarę jakości klasyfikacji binarnej niż dokładność czy miara F1 w~przypadku zbiorów niezbalansowanych, dlatego metryka ta została przyjęta jako główne kryterium porównawcze modeli.
+
+%--------------------------------------
+\subsection{Model bazowy}
+%--------------------------------------
+
+Jako punkt odniesienia (ang.~\textit{baseline}) dla modeli opartych na sieciach LSTM zastosowano klasyfikator regresji logistycznej (ang.~\textit{Logistic Regression}), zaimplementowany z~wykorzystaniem biblioteki scikit-learn~\cite{pedregosa2011sklearn}. Model bazowy otrzymywał na wejściu spłaszczoną reprezentację okna czasowego --- konkatenację wektorów ProtVec ze~wszystkich kroków czasowych w~oknie --- i~dokonywał klasyfikacji binarnej każdej pozycji aminokwasowej niezależnie. Wybór regresji logistycznej jako modelu bazowego pozwala ocenić, w~jakim stopniu architektury rekurencyjne wykorzystują informację o~zależnościach temporalnych w~porównaniu z~modelem liniowym nieuwzględniającym struktury sekwencyjnej danych.
+
+%--------------------------------------
+\subsection{Wyniki dla SARS-CoV-2 Spike}
+\label{sec:results-sarscov2}
+%--------------------------------------
+
+\subsubsection{Porównanie architektur}
+
+W~tabeli~\ref{tab:results-sarscov2} zestawiono wyniki ewaluacji czterech modeli na zbiorze testowym sekwencji białka S wirusa SARS-CoV-2. Wartości metryk zostały obliczone na zbiorze testowym obejmującym chronologicznie najnowsze okresy czasowe.
+
+\begin{table}[H]
+    \centering
+    \caption{Porównanie wyników modeli na zbiorze testowym SARS-CoV-2 Spike. Najlepsze wartości dla każdej metryki zostały wyróżnione pogrubieniem.}
+    \label{tab:results-sarscov2}
+    \begin{tabular}{lcccccc}
+        \toprule
+        \textbf{Model} & \textbf{Accuracy} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} & \textbf{MCC} & \textbf{ROC-AUC} \\
+        \midrule
+        Regresja logistyczna    & --- & --- & --- & --- & --- & --- \\
+        LSTM                    & --- & --- & --- & --- & --- & --- \\
+        Attention LSTM          & --- & --- & --- & --- & --- & --- \\
+        Dual Attention LSTM     & --- & --- & --- & --- & --- & --- \\
+        \bottomrule
+    \end{tabular}
+    % TODO: Uzupełnić wartości metryk po przeprowadzeniu eksperymentów.
+\end{table}
+
+% TODO: Analiza wyników --- który model osiągnął najlepsze wyniki i z jakiego powodu.
+% Oczekiwania: modele z mechanizmem atencji powinny osiągać wyższe wartości MCC
+% niż standardowy LSTM, ponieważ mogą selektywnie ważyć informację z różnych
+% kroków czasowych okna. Dual Attention LSTM, operujący zarówno na wymiarze
+% czasowym, jak i wymiarze cech, powinien osiągnąć najwyższe wartości.
+
+% TODO: Rysunek - krzywe ROC dla wszystkich modeli na jednym wykresie
+% \begin{figure}[H]
+%     \centering
+%     % \includegraphics[width=0.7\textwidth]{rysunki/roc_sarscov2.pdf}
+%     \caption{Krzywe ROC dla porównywanych modeli na zbiorze testowym SARS-CoV-2 Spike.}
+%     \label{fig:roc-sarscov2}
+% \end{figure}
+
+% TODO: Rysunek - macierz pomyłek najlepszego modelu
+% \begin{figure}[H]
+%     \centering
+%     % \includegraphics[width=0.5\textwidth]{rysunki/confusion_matrix_sarscov2.pdf}
+%     \caption{Macierz pomyłek najlepszego modelu na zbiorze testowym SARS-CoV-2 Spike.}
+%     \label{fig:cm-sarscov2}
+% \end{figure}
+
+\subsubsection{Analiza mechanizmu atencji}
+
+Istotną zaletą modeli wyposażonych w~mechanizm atencji jest możliwość interpretacji nauczonych wag, które wskazują, którym krokom czasowym w~oknie przesuwnym model przypisuje największe znaczenie predykcyjne.
+
+% TODO: Rysunek - wizualizacja wag atencji (heatmapa lub wykres słupkowy)
+% pokazujący średnie wagi atencji dla poszczególnych kroków czasowych w oknie.
+% \begin{figure}[H]
+%     \centering
+%     % \includegraphics[width=0.7\textwidth]{rysunki/attention_weights_sarscov2.pdf}
+%     \caption{Średnie wagi atencji modelu Attention LSTM dla poszczególnych kroków
+%              czasowych w oknie przesuwnym (SARS-CoV-2 Spike).}
+%     \label{fig:attention-sarscov2}
+% \end{figure}
+
+% TODO: Interpretacja biologiczna wag atencji:
+% - Czy model przypisuje większą wagę nowszym okresom (bliższym predykowanemu)?
+% - Czy obserwuje się wzrost wag w okresach pojawienia się wariantów Alpha, Delta, Omicron?
+% - Jakie wnioski biologiczne można wyciągnąć z rozkładu wag atencji?
+
+%--------------------------------------
+\subsection{Wyniki dla Influenza A H1N1 HA}
+\label{sec:results-influenza}
+%--------------------------------------
+
+\subsubsection{Porównanie architektur}
+
+Analogiczną ewaluację przeprowadzono na zbiorze danych sekwencji białka HA wirusa Influenza A podtypu H1N1. Wyniki zestawiono w~tabeli~\ref{tab:results-influenza}.
+
+\begin{table}[H]
+    \centering
+    \caption{Porównanie wyników modeli na zbiorze testowym Influenza A H1N1 HA. Najlepsze wartości dla każdej metryki zostały wyróżnione pogrubieniem.}
+    \label{tab:results-influenza}
+    \begin{tabular}{lcccccc}
+        \toprule
+        \textbf{Model} & \textbf{Accuracy} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} & \textbf{MCC} & \textbf{ROC-AUC} \\
+        \midrule
+        Regresja logistyczna    & --- & --- & --- & --- & --- & --- \\
+        LSTM                    & --- & --- & --- & --- & --- & --- \\
+        Attention LSTM          & --- & --- & --- & --- & --- & --- \\
+        Dual Attention LSTM     & --- & --- & --- & --- & --- & --- \\
+        \bottomrule
+    \end{tabular}
+    % TODO: Uzupełnić wartości metryk po przeprowadzeniu eksperymentów.
+\end{table}
+
+% TODO: Analiza wyników dla Influenza --- porównanie modeli, interpretacja.
+% Dane Influenza mają roczną granularność i dłuższą historię ewolucyjną,
+% co może wpływać na jakość predykcji w porównaniu z danymi SARS-CoV-2.
+
+\subsubsection{Analiza mechanizmu atencji}
+
+% TODO: Wizualizacja i interpretacja wag atencji dla danych Influenza.
+% - Czy rozkład wag różni się od SARS-CoV-2?
+% - Jak roczna granularność wpływa na rozkład wag?
+% - Czy model identyfikuje lata o szczególnym znaczeniu epidemiologicznym?
+
+% \begin{figure}[H]
+%     \centering
+%     % \includegraphics[width=0.7\textwidth]{rysunki/attention_weights_influenza.pdf}
+%     \caption{Średnie wagi atencji modelu Attention LSTM dla poszczególnych kroków
+%              czasowych w oknie przesuwnym (Influenza A H1N1 HA).}
+%     \label{fig:attention-influenza}
+% \end{figure}
+
+%--------------------------------------
+\subsection{Analiza porównawcza}
+\label{sec:cross-analysis}
+%--------------------------------------
+
+W~celu oceny zdolności frameworku do generalizacji między różnymi białkami wirusowymi przeprowadzono analizę porównawczą wyników uzyskanych dla obu zbiorów danych.
+
+% TODO: Tabela podsumowująca - najlepsze wyniki MCC dla każdego modelu i zbioru danych.
+% \begin{table}[H]
+%     \centering
+%     \caption{Porównanie najlepszych wartości MCC między zbiorami danych.}
+%     \label{tab:cross-comparison}
+%     \begin{tabular}{lcc}
+%         \toprule
+%         \textbf{Model} & \textbf{SARS-CoV-2 Spike} & \textbf{Influenza A H1N1 HA} \\
+%         \midrule
+%         Regresja logistyczna    & --- & --- \\
+%         LSTM                    & --- & --- \\
+%         Attention LSTM          & --- & --- \\
+%         Dual Attention LSTM     & --- & --- \\
+%         \bottomrule
+%     \end{tabular}
+% \end{table}
+
+% TODO: Analiza porównawcza obejmująca następujące aspekty:
+% 1. Czy ranking modeli jest spójny między oboma zbiorami danych?
+%    Jeśli tak, potwierdza to, że przewaga architektur z atencją jest niezależna
+%    od konkretnego białka wirusowego.
+% 2. Wpływ rozmiaru zbioru danych na jakość predykcji --- zbiór Influenza
+%    jest ponad trzykrotnie większy niż zbiór SARS-CoV-2.
+% 3. Wpływ granularności czasowej --- miesięczna (SARS-CoV-2) vs. roczna (Influenza).
+% 4. Różnice w dynamice ewolucyjnej obu wirusów i ich przełożenie na wyniki.
+
+%--------------------------------------
+\subsection{Dyskusja}
+\label{sec:discussion}
+%--------------------------------------
+
+% TODO: Interpretacja wyników w kontekście literatury.
+% Porównanie z podejściami opartymi na modelach językowych (Hie i in.~\cite{hie2021viral}),
+% które wykorzystywały wstępnie wytrenowane reprezentacje sekwencji białkowych
+% do przewidywania ucieczki immunologicznej wirusów. W odróżnieniu od tego podejścia,
+% zaproponowany framework jawnie modeluje dynamikę temporalną ewolucji wirusowej
+% z wykorzystaniem okna przesuwnego i architektur rekurencyjnych.
+
+% TODO: Porównanie z podejściem Mahera i in.~\cite{maher2022predicting},
+% którzy zastosowali modele gradient boosting do identyfikacji sterowników
+% mutacyjnych wariantów SARS-CoV-2. Zaproponowany framework różni się
+% wykorzystaniem informacji temporalnej z wielu kolejnych okresów czasowych
+% oraz możliwością zastosowania do różnych białek wirusowych.
+
+% TODO: Omówienie ograniczeń eksperymentów:
+% - Zależność od jakości danych źródłowych (bias w próbkowaniu sekwencji).
+% - Wpływ progów klasteryzacji na jakość predykcji.
+% - Ograniczenia wynikające z binarnej natury predykcji (mutacja/brak mutacji)
+%   w porównaniu z predykcją konkretnego aminokwasu substytucyjnego.
+% - Brak walidacji prospektywnej na danych z przyszłych okresów.
+
+% TODO: Wnioski z eksperymentów:
+% - Podsumowanie, która architektura okazała się najskuteczniejsza.
+% - Ocena, czy mechanizm atencji wnosi istotną poprawę.
+% - Ocena konfigurowalności i reprodukowalności frameworku.
+% - Wnioski dotyczące generalizowalności między różnymi białkami wirusowymi.

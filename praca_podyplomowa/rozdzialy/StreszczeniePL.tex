@@ -4,15 +4,15 @@
 \cleardoublepage % Zaczynamy od nieparzystej strony
 \streszczenie
 
-Głównym celem pracy jest
-Nacisk w pracy został położony na ...
-W pierwszej części pracy przedstawiono ...
-Następnie opisano ...
-Druga część pracy rozpoczyna się od ...
-Eksperymenty opisane w dalszej części pracy przedstawiają ...
-Dodatkowym etapem pracy jest ...
-W zakończeniu pracy przedstawiono podsumowanie wykonanych działań
-oraz dalsze działania, które mogą przynieść poprawę ...
+Mutacje aminokwasowe w~białkach wirusowych stanowią kluczowy czynnik warunkujący zdolność patogenów do unikania odpowiedzi immunologicznej gospodarza. Zdolność do przewidywania przyszłych mutacji w~regionach epitopowych białek powierzchniowych wirusów ma istotne znaczenie dla projektowania szczepionek i~monitorowania epidemiologicznego. Niniejsza praca przedstawia konfigurowalny framework do predykcji mutacji aminokwasowych w~białkach wirusowych z~wykorzystaniem rekurencyjnych sieci neuronowych.
 
-\slowakluczowe NFT, ChatGPT, Buzzword300
+Zaproponowany potok przetwarzania obejmuje następujące etapy: parsowanie sekwencji w~formacie FASTA, kodowanie aminokwasów metodą ProtVec, klasteryzację sekwencji algorytmem K-means w~ramach poszczególnych okresów czasowych, łączenie klastrów między kolejnymi okresami na podstawie odległości centroidów oraz generowanie próbek treningowych z~wykorzystaniem okna przesuwnego. Framework udostępnia trzy architektury modeli predykcyjnych: standardową sieć LSTM, LSTM z~mechanizmem atencji temporalnej (Attention LSTM) oraz LSTM z~podwójnym mechanizmem atencji operującym zarówno w~wymiarze czasowym, jak i~wymiarze cech (Dual Attention LSTM).
 
+Ewaluację przeprowadzono na dwóch zbiorach danych: sekwencjach białka S (Spike) wirusa SARS-CoV-2 pozyskanych z~bazy GISAID oraz sekwencjach białka hemagglutyniny (HA) wirusa Influenza A podtypu H1N1 z~bazy NCBI.
+% TODO: Uzupełnić wyniki --- np.: Model Dual Attention LSTM osiągnął najwyższe
+% wartości współczynnika korelacji Matthewsa (MCC) wynoszące odpowiednio
+% X,XX dla SARS-CoV-2 i Y,YY dla Influenza, przewyższając zarówno model bazowy
+% (regresja logistyczna), jak i standardową architekturę LSTM.
+Zaprojektowany framework charakteryzuje się konfigurowalnością opartą na plikach YAML, reprodukowalnością eksperymentów oraz rozszerzalnością umożliwiającą zastosowanie do nowych białek wirusowych bez modyfikacji kodu źródłowego.
+
+\slowakluczowe predykcja mutacji, SARS-CoV-2, Influenza, LSTM, mechanizm atencji, ProtVec, klasteryzacja

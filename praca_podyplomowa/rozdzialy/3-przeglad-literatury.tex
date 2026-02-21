@@ -1,15 +1,221 @@
-\newpage % Rozdziały zaczynamy od nowej strony.
-\section{Przegląd literaratury}
+\newpage
+\section{Przegląd literatury}
+\label{sec:przeglad-literatury}
 
-Przegląd literatury związanej z rozwiązywanym problemem. 
+Niniejszy rozdział przedstawia przegląd najważniejszych prac i metod stanowiących fundament teoretyczny proponowanego rozwiązania. Omówiono w~nim zagadnienia z~zakresu reprezentacji sekwencji białkowych w~postaci wektorowej, metod klasteryzacji danych sekwencyjnych, architektur rekurencyjnych sieci neuronowych, mechanizmów atencji oraz dotychczasowych podejść do predykcji mutacji wirusowych. Każdy z~podrozdziałów rozpoczyna się od sformułowania problemu, następnie opisuje kluczowe rozwiązania zaproponowane w~literaturze i~kończy odniesieniem do sposobu ich wykorzystania w~niniejszej pracy.
 
-W pracy~\cite{he2016deep} opisano ....
-W~\cite{liu2022convnet} zaproponowano nowatorską architekturę....
-Przykładowy rysunek~\ref{fig:convnext}.
+% ===========================================================
+\subsection{Reprezentacja sekwencji białek}
+\label{sec:reprezentacja-sekwencji}
 
-\begin{figure}[h]
+Jednym z~podstawowych wyzwań w~zastosowaniu metod uczenia maszynowego (ang.~\textit{machine learning}) do analizy danych biologicznych jest problem numerycznej reprezentacji sekwencji aminokwasowych. Sekwencje białkowe składają się z~łańcuchów aminokwasów, z~których każdy może przyjmować jedną z~dwudziestu standardowych postaci. Aby możliwe było zastosowanie algorytmów operujących na przestrzeniach wektorowych, konieczne jest przekształcenie symbolicznych sekwencji aminokwasowych w~wektory liczb rzeczywistych, przy czym reprezentacja ta powinna zachowywać istotne relacje biochemiczne między aminokwasami.
+
+Przełomową pracę w~dziedzinie rozproszonych reprezentacji wektorowych (ang.~\textit{distributed representations}) opublikowali Mikolov i~wsp.~\cite{mikolov2013word2vec}. Zaproponowali oni model Word2Vec, który umożliwia uczenie reprezentacji wektorowych słów na podstawie ich kontekstu w~dużych korpusach tekstowych. Model Word2Vec występuje w~dwóch wariantach architektonicznych: Skip-gram oraz CBOW (ang.~\textit{Continuous Bag of Words}). W~wariancie Skip-gram, dla danego słowa wejściowego model przewiduje słowa z~jego otoczenia kontekstowego, natomiast w~wariancie CBOW na podstawie kontekstu przewidywane jest słowo centralne. Kluczową właściwością uzyskanych reprezentacji jest zachowanie relacji semantycznych w~przestrzeni wektorowej -- słowa o~podobnym znaczeniu znajdują się blisko siebie w~tej przestrzeni, a~kierunki wektorów kodują regularności semantyczne.
+
+Asgari i~Mofrad~\cite{asgari2015protvec} dokonali adaptacji podejścia Word2Vec do dziedziny bioinformatyki, proponując metodę ProtVec. W~ich podejściu sekwencje białkowe traktowane są analogicznie do zdań w~języku naturalnym, natomiast trigramy aminokwasów (ang.~\textit{3-grams}) -- czyli nakładające się podciągi o~długości trzech aminokwasów -- pełnią rolę słów. Model ProtVec został wytrenowany na bazie danych Swiss-Prot zawierającej 546\,956 sekwencji białkowych, z~wykorzystaniem architektury Skip-gram z~oknem kontekstowym. W~wyniku tego procesu uzyskano reprezentacje wektorowe dla 9048 unikalnych trigramów aminokwasowych, przy czym każdy trigram został odwzorowany na wektor 100-wymiarowy. Reprezentacja całej sekwencji białkowej powstaje poprzez zsumowanie wektorów trigramów wchodzących w~skład danej sekwencji.
+
+Walidacja metody ProtVec wykazała, że uzyskane reprezentacje wektorowe zachowują istotne właściwości biologiczne. Autorzy potwierdzili przydatność zaproponowanego podejścia w~zadaniach klasyfikacji funkcji białek oraz klasteryzacji rodzin białkowych, uzyskując wyniki porównywalne z~tradycyjnymi metodami opartymi na macierzach substytucji. W~niniejszej pracy metoda ProtVec została wykorzystana jako podstawowa reprezentacja wejściowa sekwencji aminokwasowych, dostarczając wektorów zarówno do etapu klasteryzacji, jak i~do modeli rekurencyjnych sieci neuronowych.
+
+% ===========================================================
+\subsection{Klasteryzacja danych sekwencyjnych}
+\label{sec:klasteryzacja}
+
+Klasteryzacja (ang.~\textit{clustering}) stanowi jedną z~fundamentalnych metod uczenia nienadzorowanego (ang.~\textit{unsupervised learning}), której celem jest podział zbioru obserwacji na grupy (klastry) w~taki sposób, aby obiekty w~obrębie jednej grupy były do siebie bardziej podobne niż do obiektów należących do pozostałych grup. W~kontekście analizy sekwencji wirusowych klasteryzacja umożliwia identyfikację dominujących wariantów w~danym okresie czasowym oraz śledzenie ich ewolucji.
+
+Algorytm K-means, zaproponowany przez MacQueena~\cite{macqueen1967kmeans}, jest jedną z~najszerzej stosowanych metod klasteryzacji. Jego celem jest podział zbioru $n$ obserwacji na $k$ klastrów poprzez minimalizację sumy kwadratów odległości wewnątrz klastrów. Problem optymalizacyjny rozwiązywany przez algorytm K-means można sformułować następująco:
+\begin{equation}
+\label{eq:kmeans-objective}
+\underset{S}{\arg\min} \sum_{i=1}^{k} \sum_{\mathbf{x} \in S_i} \|\mathbf{x} - \boldsymbol{\mu}_i\|^2,
+\end{equation}
+gdzie $S = \{S_1, S_2, \ldots, S_k\}$ oznacza podział zbioru danych na $k$ klastrów, $\mathbf{x}$ jest wektorem obserwacji, a~$\boldsymbol{\mu}_i$ jest centroidem (wektorem średnim) klastra $S_i$. Algorytm działa iteracyjnie: po losowej inicjalizacji centroidów, w~każdej iteracji przypisuje obserwacje do najbliższego centroidu (krok przypisania), a~następnie wyznacza nowe centroidy jako średnie arytmetyczne przypisanych obserwacji (krok aktualizacji). Proces powtarzany jest do osiągnięcia zbieżności, tj.~do momentu, w~którym przypisania obserwacji do klastrów przestają się zmieniać.
+
+Dla dużych zbiorów danych obliczenie pełnego kroku przypisania w~każdej iteracji staje się kosztowne obliczeniowo. Sculley~\cite{sculley2010minibatch} zaproponował wariant algorytmu K-means oparty na mini-partiach (ang.~\textit{Mini-Batch K-means}), w~którym w~każdej iteracji wykorzystywany jest losowo wybrany podzbiór danych zamiast całego zbioru. Takie podejście znacząco redukuje czas obliczeń, zachowując przy tym jakość klasteryzacji zbliżoną do standardowego algorytmu K-means. W~kontekście niniejszej pracy, w~której przetwarzane są dziesiątki tysięcy sekwencji w~wielu okresach czasowych, wariant Mini-Batch stanowi praktyczne rozwiązanie umożliwiające efektywne przetwarzanie dużych zbiorów danych.
+
+Istotnym zagadnieniem w~klasteryzacji jest ocena jakości uzyskanego podziału. Rousseeuw~\cite{rousseeuw1987silhouette} zaproponował współczynnik sylwetki (ang.~\textit{Silhouette Score}), który stanowi miarę spójności i~separacji klastrów. Dla pojedynczej obserwacji $i$ współczynnik sylwetki definiowany jest jako:
+\begin{equation}
+\label{eq:silhouette}
+s(i) = \frac{b(i) - a(i)}{\max\{a(i),\, b(i)\}},
+\end{equation}
+gdzie $a(i)$ oznacza średnią odległość obserwacji $i$ od pozostałych obserwacji w~tym samym klastrze (miara spójności), natomiast $b(i)$ oznacza minimalną wartość średniej odległości obserwacji $i$ od obserwacji w~dowolnym innym klastrze (miara separacji). Współczynnik przyjmuje wartości z~zakresu $[-1,\, 1]$: wartość bliska $1$ oznacza, że obserwacja jest dobrze dopasowana do swojego klastra, wartość bliska $0$ wskazuje na położenie na granicy między klastrami, a~wartość ujemna sugeruje błędne przypisanie. W~niniejszej pracy współczynnik sylwetki wykorzystywany jest do automatycznego doboru optymalnej liczby klastrów $k$ w~poszczególnych okresach czasowych.
+
+% ===========================================================
+\subsection{Rekurencyjne sieci neuronowe}
+\label{sec:rnn}
+
+Rekurencyjne sieci neuronowe (ang.~\textit{Recurrent Neural Networks}, RNN) stanowią klasę architektur sieci neuronowych zaprojektowanych do przetwarzania danych sekwencyjnych, w~których kolejność elementów niesie istotną informację. W~odróżnieniu od sieci jednokierunkowych (ang.~\textit{feedforward}), sieci rekurencyjne posiadają połączenia zwrotne, dzięki czemu mogą przechowywać informację o~wcześniej przetworzonych elementach sekwencji w~wewnętrznym stanie ukrytym.
+
+Elman~\cite{elman1990rnn} zaproponował jedną z~pierwszych architektur rekurencyjnych, w~której stan ukryty $\mathbf{h}_t$ w~kroku czasowym $t$ jest funkcją bieżącego wejścia $\mathbf{x}_t$ oraz stanu ukrytego z~poprzedniego kroku $\mathbf{h}_{t-1}$. Pomimo teoretycznej zdolności do modelowania zależności w~dowolnie długich sekwencjach, w~praktyce standardowe sieci rekurencyjne cierpią na problem zanikającego gradientu (ang.~\textit{vanishing gradient}). Podczas propagacji wstecznej w~czasie (ang.~\textit{Backpropagation Through Time}, BPTT) gradienty funkcji straty są mnożone wielokrotnie przez te same macierze wag, co prowadzi do ich wykładniczego zanikania bądź eksplozji. W~konsekwencji sieć nie jest w~stanie efektywnie uczyć się zależności między odległymi elementami sekwencji.
+
+Problem zanikającego gradientu został rozwiązany przez Hochreitera i~Schmidhu\-bera~\cite{hochreiter1997lstm}, którzy zaproponowali architekturę sieci LSTM (ang.~\textit{Long Short-Term Memory}). Kluczową innowacją jest wprowadzenie stanu komórki $\mathbf{C}_t$, który pełni rolę magistrali informacyjnej przebiegającej przez całą sekwencję, oraz trzech mechanizmów bramkowania kontrolujących przepływ informacji. Bramka zapominania (ang.~\textit{forget gate}) decyduje, jaka część dotychczasowego stanu komórki powinna zostać zachowana:
+\begin{equation}
+\label{eq:lstm-forget}
+\mathbf{f}_t = \sigma(\mathbf{W}_f \cdot [\mathbf{h}_{t-1},\, \mathbf{x}_t] + \mathbf{b}_f),
+\end{equation}
+gdzie $\sigma$ oznacza funkcję sigmoidalną, $\mathbf{W}_f$ jest macierzą wag, $\mathbf{b}_f$ wektorem obciążeń, a~$[\mathbf{h}_{t-1},\, \mathbf{x}_t]$ oznacza konkatenację wektora stanu ukrytego z~poprzedniego kroku i~bieżącego wejścia. Bramka wejścia (ang.~\textit{input gate}) wraz z~kandydatem na nowy stan komórki określają, jakie nowe informacje zostaną zapisane:
+\begin{equation}
+\label{eq:lstm-input}
+\mathbf{i}_t = \sigma(\mathbf{W}_i \cdot [\mathbf{h}_{t-1},\, \mathbf{x}_t] + \mathbf{b}_i),
+\end{equation}
+\begin{equation}
+\label{eq:lstm-candidate}
+\tilde{\mathbf{C}}_t = \tanh(\mathbf{W}_C \cdot [\mathbf{h}_{t-1},\, \mathbf{x}_t] + \mathbf{b}_C).
+\end{equation}
+Stan komórki jest aktualizowany poprzez selektywne zapominanie starej informacji i~dodawanie nowej:
+\begin{equation}
+\label{eq:lstm-cell}
+\mathbf{C}_t = \mathbf{f}_t \odot \mathbf{C}_{t-1} + \mathbf{i}_t \odot \tilde{\mathbf{C}}_t,
+\end{equation}
+gdzie $\odot$ oznacza iloczyn Hadamarda (elementowy). Na końcu bramka wyjścia (ang.~\textit{output gate}) decyduje, jaka część stanu komórki zostanie udostępniona jako stan ukryty:
+\begin{equation}
+\label{eq:lstm-output}
+\mathbf{o}_t = \sigma(\mathbf{W}_o \cdot [\mathbf{h}_{t-1},\, \mathbf{x}_t] + \mathbf{b}_o),
+\end{equation}
+\begin{equation}
+\label{eq:lstm-hidden}
+\mathbf{h}_t = \mathbf{o}_t \odot \tanh(\mathbf{C}_t).
+\end{equation}
+
+Rysunek~\ref{fig:lstm-cell} przedstawia uproszczony schemat komórki LSTM z~zaznaczonymi bramkami i~przepływem informacji.
+
+\begin{figure}[ht]
     \centering
-    \includegraphics[width=0.5\textwidth]{rysunki/convnext_block.png}
-    \caption{Porównanie bloków rezydualnych wykorzystywanych w sieci Swin Transformer, ResNet i ConvNeXt.}
-    \label{fig:convnext}
+    \begin{tikzpicture}[
+        >=Stealth,
+        node distance=1.4cm and 1.8cm,
+        gate/.style={draw, minimum size=0.9cm, inner sep=0pt, rounded corners=2pt, fill=blue!12},
+        op/.style={draw, circle, minimum size=0.7cm, inner sep=0pt, fill=yellow!15},
+        arr/.style={->, thick},
+        every node/.style={font=\small}
+    ]
+
+    % --- Input ---
+    \node (xt) {$\mathbf{x}_t$};
+    \node[above=2.8cm of xt] (ht_prev_top) {};
+
+    % --- Forget gate ---
+    \node[gate, right=1.2cm of xt, yshift=1.0cm] (fg) {$\sigma$};
+    \node[below=0.15cm of fg, font=\scriptsize] {$\mathbf{f}_t$};
+
+    % --- Input gate ---
+    \node[gate, right=0.9cm of fg] (ig) {$\sigma$};
+    \node[below=0.15cm of ig, font=\scriptsize] {$\mathbf{i}_t$};
+
+    % --- Candidate ---
+    \node[gate, right=0.9cm of ig] (cg) {$\tanh$};
+    \node[below=0.15cm of cg, font=\scriptsize] {$\tilde{\mathbf{C}}_t$};
+
+    % --- Output gate ---
+    \node[gate, right=0.9cm of cg] (og) {$\sigma$};
+    \node[below=0.15cm of og, font=\scriptsize] {$\mathbf{o}_t$};
+
+    % --- Cell state line ---
+    \node[left=0.5cm of fg, yshift=2.0cm] (Ct_in) {$\mathbf{C}_{t-1}$};
+    \node[op, right=0.0cm of fg, yshift=2.0cm] (mult1) {$\odot$};
+    \node[op, right=1.3cm of mult1] (add1) {$+$};
+    \node[right=2.5cm of add1] (Ct_out) {$\mathbf{C}_t$};
+
+    % --- tanh on cell state for output ---
+    \node[gate, below=0.5cm of Ct_out, xshift=-0.7cm] (tanh_out) {$\tanh$};
+    \node[op, below=0.5cm of tanh_out] (mult2) {$\odot$};
+
+    % --- Hidden state ---
+    \node[left=0.5cm of fg, yshift=-0.4cm] (ht_prev) {$\mathbf{h}_{t-1}$};
+    \node[right=0.5cm of mult2] (ht_out) {$\mathbf{h}_t$};
+
+    % --- Connections: cell state line ---
+    \draw[arr] (Ct_in) -- (mult1);
+    \draw[arr] (mult1) -- (add1);
+    \draw[arr] (add1) -- (Ct_out);
+
+    % --- Forget gate to multiply ---
+    \draw[arr] (fg) |- (mult1);
+
+    % --- Input gate and candidate to add ---
+    \node[op, above=0.45cm of ig, yshift=0.3cm] (mult_ic) {$\odot$};
+    \draw[arr] (ig) -- (mult_ic);
+    \draw[arr] (cg) |- (mult_ic);
+    \draw[arr] (mult_ic) -- (add1);
+
+    % --- Cell state to tanh for output ---
+    \draw[arr] (add1) -| (tanh_out);
+    \draw[arr] (tanh_out) -- (mult2);
+    \draw[arr] (og) |- (mult2);
+    \draw[arr] (mult2) -- (ht_out);
+
+    % --- Inputs to gates ---
+    \coordinate (input_join) at ($(xt)+(0.6cm,0)$);
+    \draw[arr] (xt) -- (input_join);
+    \draw[-] (input_join) -- ++(0,0.5cm);
+    \draw[arr] (input_join) |- (fg.west);
+    \draw[arr] (input_join) |- (ig.west);
+    \draw[arr] (input_join) |- (cg.west);
+    \draw[arr] (input_join) |- (og.west);
+
+    % --- h_{t-1} to gates ---
+    \draw[arr] (ht_prev) -- ++(0.3cm,0) |- (fg.south west);
+
+    \end{tikzpicture}
+    \caption{Uproszczony schemat komórki LSTM. Symbole $\sigma$ i~$\tanh$ oznaczają odpowiednie funkcje aktywacji, $\odot$~iloczyn Hadamarda, a~$+$~dodawanie elementowe. Bramka zapominania~$\mathbf{f}_t$ kontroluje usuwanie informacji ze stanu komórki, bramka wejścia~$\mathbf{i}_t$ i~kandydat~$\tilde{\mathbf{C}}_t$ odpowiadają za dodawanie nowych informacji, zaś bramka wyjścia~$\mathbf{o}_t$ determinuje stan ukryty~$\mathbf{h}_t$.}
+    \label{fig:lstm-cell}
 \end{figure}
+
+Dzięki mechanizmowi bramkowania sieci LSTM potrafią selektywnie przechowywać i~usuwać informacje z~pamięci długoterminowej, co czyni je szczególnie przydatnymi w~zadaniach wymagających modelowania długodystansowych zależności. W~dziedzinie bioinformatyki sieci LSTM znalazły zastosowanie między innymi w~analizie sekwencji białkowych, predykcji struktury drugorzędowej białek oraz klasyfikacji funkcji biologicznych. W~niniejszej pracy architektura LSTM stanowi podstawę modeli predykcyjnych, przetwarzających sekwencje klasteryzowanych reprezentacji ProtVec w~kolejnych okresach czasowych.
+
+% ===========================================================
+\subsection{Mechanizmy atencji}
+\label{sec:atencja}
+
+Mechanizmy atencji (ang.~\textit{attention mechanisms}) zostały wprowadzone w~celu rozwiązania ograniczenia architektur typu enkoder-dekoder (ang.~\textit{encoder-decoder}), w~których cała informacja o~sekwencji wejściowej musi zostać skompresowana do pojedynczego wektora kontekstu o~stałym rozmiarze. Ograniczenie to prowadzi do utraty informacji, szczególnie dla długich sekwencji, ponieważ wektor o~stałej długości nie jest w~stanie zakodować wszystkich istotnych zależności.
+
+Bahdanau i~wsp.~\cite{bahdanau2015attention} zaproponowali mechanizm atencji addytywnej w~kontekście neuronowego tłumaczenia maszynowego (ang.~\textit{Neural Machine Translation}). W~ich podejściu dekoder, generując kolejny element sekwencji wyjściowej, oblicza wagi atencji dla wszystkich stanów ukrytych enkodera. Energia atencji dla $j$-tego stanu ukrytego enkodera $\mathbf{h}_j$ przy generowaniu $i$-tego elementu wyjściowego jest wyrażona jako:
+\begin{equation}
+\label{eq:attention-energy}
+e_{ij} = \mathbf{v}^{\top} \tanh(\mathbf{W} \cdot \mathbf{s}_{i-1} + \mathbf{U} \cdot \mathbf{h}_j),
+\end{equation}
+gdzie $\mathbf{s}_{i-1}$ jest stanem ukrytym dekodera z~poprzedniego kroku, a~$\mathbf{v}$, $\mathbf{W}$, $\mathbf{U}$ są uczonymi parametrami. Wagi atencji uzyskiwane są poprzez normalizację energii funkcją softmax:
+\begin{equation}
+\label{eq:attention-weights}
+\alpha_{ij} = \frac{\exp(e_{ij})}{\sum_{l=1}^{T} \exp(e_{il})},
+\end{equation}
+gdzie $T$ oznacza długość sekwencji wejściowej. Wektor kontekstu $\mathbf{c}_i$ jest obliczany jako średnia ważona stanów ukrytych enkodera:
+\begin{equation}
+\label{eq:attention-context}
+\mathbf{c}_i = \sum_{j=1}^{T} \alpha_{ij} \cdot \mathbf{h}_j.
+\end{equation}
+Dzięki temu mechanizmowi model może dynamicznie skupiać się na najbardziej relewantnych fragmentach sekwencji wejściowej w~każdym kroku generowania.
+
+Luong i~wsp.~\cite{luong2015attention} zaproponowali alternatywny mechanizm atencji multiplikatywnej (ang.~\textit{multiplicative attention}), w~którym energia atencji obliczana jest jako iloczyn skalarny stanów ukrytych. Podejście to jest obliczeniowo prostsze od atencji addytywnej, a~w~wielu zastosowaniach osiąga porównywalną skuteczność.
+
+Szczególnie istotną z~punktu widzenia niniejszej pracy jest architektura DA-RNN (ang.~\textit{Dual-Stage Attention-Based Recurrent Neural Network}), zaproponowana przez Qina i~wsp.~\cite{qin2017darnn}. Model ten wprowadza dwuetapowy mechanizm atencji, zaprojektowany do predykcji szeregów czasowych. W~pierwszym etapie stosowana jest atencja wejściowa (ang.~\textit{input attention}), która adaptacyjnie przypisuje wagi poszczególnym cechom wejściowym w~każdym kroku czasowym, umożliwiając modelowi automatyczną selekcję najistotniejszych zmiennych. W~drugim etapie atencja temporalna (ang.~\textit{temporal attention}) przypisuje wagi kolejnym krokom czasowym sekwencji zakodowanej przez enkoder, pozwalając dekoderowi na selektywne wykorzystanie informacji z~różnych momentów w~przeszłości.
+
+Architektura DA-RNN została oryginalnie zaprojektowana i~walidowana na zadaniach predykcji wartości szeregów czasowych, takich jak dane ze zbioru SML 2010 oraz indeks giełdowy NASDAQ. Autorzy wykazali, że dwuetapowy mechanizm atencji pozwala na lepsze uchwycenie złożonych zależności temporalnych w~porównaniu z~pojedynczym mechanizmem atencji. W~niniejszej pracy architektura DA-RNN została zaadaptowana do predykcji mutacji aminokwasowych w~białkach wirusowych -- atencja wejściowa umożliwia modelowi identyfikację najistotniejszych pozycji aminokwasowych, natomiast atencja temporalna pozwala na selektywne wykorzystanie informacji z~poszczególnych okresów czasowych w~oknie predykcji.
+
+% ===========================================================
+\subsection{Predykcja mutacji wirusowych}
+\label{sec:predykcja-mutacji}
+
+Predykcja mutacji wirusowych stanowi jedno z~kluczowych zagadnień współczesnej bioinformatyki obliczeniowej, mające bezpośrednie implikacje dla zdrowia publicznego, w~szczególności w~kontekście projektowania szczepionek i~monitorowania ewolucji patogenów. Wirusy RNA, takie jak SARS-CoV-2 czy Influenza~A, charakteryzują się wysokim tempem mutacji, co prowadzi do powstawania nowych wariantów, które mogą wykazywać zmienioną zakaźność, zjadliwość lub zdolność do ucieczki immunologicznej (ang.~\textit{immune escape}).
+
+\subsubsection{Białko Spike wirusa SARS-CoV-2}
+
+Białko Spike~(S) wirusa SARS-CoV-2 jest glikoproteiną powierzchniową składającą się z~1273 aminokwasów, która pośredniczy w~wejściu wirusa do komórek gospodarza. Walls i~wsp.~\cite{walls2020spike} szczegółowo opisali strukturę i~funkcję tego białka, wykazując, że domena wiążąca receptor (ang.~\textit{Receptor Binding Domain}, RBD) odpowiada za interakcję z~receptorem ACE2 na powierzchni komórek ludzkich. Mutacje w~obrębie białka~S, a~w~szczególności w~rejonie epitopów rozpoznawanych przez przeciwciała neutralizujące, mogą prowadzić do utraty skuteczności odpowiedzi immunologicznej.
+
+Harvey i~wsp.~\cite{harvey2021variants} dokonali przeglądu wariantów wirusa SARS-CoV-2, dokumentując kluczowe mutacje w~białku~S, które zdefiniowały warianty budzące niepokój (ang.~\textit{Variants of Concern}, VOC), takie jak Alpha~(B.1.1.7), Beta~(B.1.351), Delta~(B.1.617.2) oraz Omicron~(B.1.1.529). Autorzy wykazali, że mutacje w~określonych pozycjach aminokwasowych, takich jak N501Y, E484K czy D614G, mają istotny wpływ na wiązanie z~receptorem ACE2 oraz zdolność wirusa do unikania neutralizacji przez przeciwciała.
+
+\subsubsection{Białko hemaglutyniny wirusa Influenza~A}
+
+Analogicznym obiektem badań w~kontekście ewolucji wirusowej jest białko hemaglutyniny (ang.~\textit{hemagglutinin}, HA) wirusa Influenza~A. Caton i~wsp.~\cite{caton1982influenza} zidentyfikowali pięć głównych miejsc antygenowych (ang.~\textit{antigenic sites}) na powierzchni hemaglutyniny podtypu H1, stanowiących docelowe regiony dla przeciwciał neutralizujących. Bush i~wsp.~\cite{bush1999influenza} wykazali, że ewolucja wirusa Influenza~A przebiega w~sposób ukierunkowany (ang.~\textit{directional evolution}), a~pozycje podlegające pozytywnej selekcji grupują się w~obrębie tych miejsc antygenowych. Obserwacja ta stanowi biologiczną przesłankę do modelowania ewolucji wirusowej jako procesu czasowego, w~którym przeszłe mutacje dostarczają informacji o~przyszłych zmianach.
+
+\subsubsection{Podejścia oparte na uczeniu maszynowym}
+
+W~ostatnich latach zaproponowano szereg metod obliczeniowych do predykcji ewolucji wirusów. Hie i~wsp.~\cite{hie2021viral} zaproponowali zastosowanie modeli językowych (ang.~\textit{language models}) do modelowania ewolucji wirusów i~ucieczki immunologicznej. Autorzy wytrenowali modele na sekwencjach białkowych wirusa Influenza~A oraz HIV-1, wykazując, że semantyka modeli językowych -- rozumiana jako zdolność do uchwycenia wzorców ewolucyjnych -- koreluje z~danymi eksperymentalnymi dotyczącymi ucieczki immunologicznej. Podejście to opiera się na hipotezie, że ewolucja wirusowa podlega regularności analogicznej do regularności języka naturalnego.
+
+Maher i~wsp.~\cite{maher2022predicting} zaproponowali metodę predykcji przyszłych wariantów SARS-CoV-2 na podstawie cech genomowych. Autorzy wykorzystali modele uczenia maszynowego do identyfikacji mutacji o~wysokim prawdopodobieństwie pojawienia się w~przyszłych wariantach wirusa, opierając się na analizie częstości mutacji, ich lokalizacji w~strukturze białka oraz cech fizykochemicznych aminokwasów. Wyniki pracy wykazały, że modele te są w~stanie identyfikować mutacje charakterystyczne dla późniejszych wariantów budzących niepokój.
+
+\subsubsection{Bazy danych sekwencji wirusowych}
+
+Realizacja badań nad ewolucją wirusową wymaga dostępu do obszernych baz danych sekwencji genomowych. Baza GISAID (ang.~\textit{Global Initiative on Sharing All Influenza Data}), opisana przez Elbe i~Buckland-Merrett~\cite{elbe2017gisaid}, stanowi największe repozytorium sekwencji genomowych wirusa SARS-CoV-2, zawierające ponad milion zdeponowanych sekwencji. W~niniejszej pracy dane dotyczące sekwencji białka~S wirusa SARS-CoV-2 zostały pozyskane właśnie z~tej bazy. Dla wirusa Influenza~A analogicznym źródłem danych jest baza NCBI Influenza Virus Resource, opisana przez Bao i~wsp.~\cite{bao2008ncbi}, zapewniająca dostęp do sekwencji hemaglutyniny z~wieloletniego okresu nadzoru epidemiologicznego.
+
+\subsubsection{Luka badawcza}
+
+Dotychczasowe podejścia do predykcji mutacji wirusowych opierają się w~przeważającej mierze na modelach językowych lub metodach statystycznych operujących bezpośrednio na surowych sekwencjach aminokwasowych. Zdecydowanie mniej prac analizuje problem predykcji mutacji z~perspektywy analizy szeregów czasowych klasteryzowanych reprezentacji wektorowych. W~niniejszej pracy zaproponowano podejście łączące reprezentacje ProtVec, klasteryzację K-means w~oknie czasowym oraz rekurencyjne sieci neuronowe z~mechanizmem podwójnej atencji (DA-RNN). Takie ujęcie umożliwia modelowanie dynamiki ewolucji wirusowej na poziomie populacji wariantów, a~nie pojedynczych sekwencji, co stanowi odmienne i~komplementarne podejście wobec metod opisanych w~literaturze.

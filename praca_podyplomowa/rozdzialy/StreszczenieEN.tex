@@ -1,11 +1,19 @@
 %--------------------------------------
-% Streszczenie po angielski
+% Streszczenie po angielsku
 %--------------------------------------
 \newpage % Rozdziały zaczynamy od nowej strony.
 
 \abstract
 
-Summary in English.....
+Amino acid mutations in viral proteins constitute a key factor determining the ability of pathogens to evade the host immune response. The capacity to predict future mutations in epitope regions of viral surface proteins is of considerable importance for vaccine design and epidemiological surveillance. This thesis presents a configurable framework for predicting amino acid mutations in viral proteins using recurrent neural networks.
 
-\keywords ChatGPT, Buzzword300
+The proposed processing pipeline comprises the following stages: parsing sequences in FASTA format, encoding amino acids using the ProtVec method, clustering sequences with the K-means algorithm within individual time periods, linking clusters between consecutive periods based on centroid distances, and generating training samples using a sliding window approach. The framework provides three predictive model architectures: a standard LSTM network, an LSTM with a temporal attention mechanism (Attention LSTM), and an LSTM with a dual attention mechanism operating across both the temporal and feature dimensions (Dual Attention LSTM).
 
+The evaluation was conducted on two datasets: SARS-CoV-2 Spike protein sequences obtained from the GISAID database and Influenza A H1N1 hemagglutinin (HA) protein sequences from the NCBI database.
+% TODO: Add results --- e.g.: The Dual Attention LSTM model achieved the highest
+% Matthews Correlation Coefficient (MCC) values of X.XX for SARS-CoV-2 and Y.YY
+% for Influenza, outperforming both the baseline model (logistic regression) and
+% the standard LSTM architecture.
+The designed framework is characterised by YAML-based configurability, experiment reproducibility, and extensibility enabling application to novel viral proteins without modifications to the source code.
+
+\keywords mutation prediction, SARS-CoV-2, Influenza, LSTM, attention mechanism, ProtVec, clustering

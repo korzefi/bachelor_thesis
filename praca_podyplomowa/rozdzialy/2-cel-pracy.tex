@@ -1,5 +1,15 @@
-\newpage % Rozdziały zaczynamy od nowej strony.
+\newpage
 \section{Cel pracy}
 
-Celem niniejszej pracy jest ....... (teza badawcza)
+Tezą niniejszej pracy jest stwierdzenie, że rekurencyjne sieci neuronowe z~mechanizmami atencji, trenowane na klasteryzowanych reprezentacjach ProtVec sekwencji białkowych w~oknach czasowych, umożliwiają skuteczną predykcję mutacji aminokwasowych w~regionach epitopowych białek wirusowych. Weryfikacja tej tezy wymaga zarówno zaprojektowania kompletnego potoku przetwarzania danych, jak i~przeprowadzenia eksperymentów porównawczych z~wykorzystaniem architektur o~rosnącej złożoności mechanizmów atencji na danych pochodzących z~dwóch różnych patogenów wirusowych.
 
+W~celu weryfikacji postawionej tezy sformułowano następujące cele szczegółowe:
+\begin{enumerate}
+    \item Zaprojektowanie i~implementacja konfigurowalnego frameworka do przetwarzania sekwencji białkowych z~plików FASTA, obejmującego czyszczenie danych, podział na okresy czasowe oraz klasteryzację K-means z~wykorzystaniem reprezentacji ProtVec.
+    \item Opracowanie algorytmu dwukierunkowego łączenia klastrów między kolejnymi okresami czasowymi oraz mechanizmu tworzenia zbioru danych z~oknem przesuwnym, uwzględniającego ekstrakcję regionów epitopowych.
+    \item Implementacja i~porównanie trzech architektur modeli opartych na rekurencyjnych sieciach neuronowych: bazowego modelu LSTM, modelu LSTM z~mechanizmem atencji Bahdanau oraz modelu LSTM z~podwójną atencją (ang.~\textit{input attention} oraz \textit{temporal attention}).
+    \item Przeprowadzenie ewaluacji eksperymentalnej na dwóch zbiorach danych --- sekwencjach białka~S wirusa SARS-CoV-2 oraz białka HA wirusa Influenza~A podtypu H1N1 --- z~zastosowaniem chronologicznego podziału danych i~oceną za pomocą współczynnika korelacji Matthewsa (MCC).
+    \item Zapewnienie reprodukowalności eksperymentów poprzez konteneryzację środowiska Docker oraz zarządzanie konfiguracją za pomocą plików YAML.
+\end{enumerate}
+
+Zakres niniejszej pracy obejmuje analizę białek wirusowych, dla których dostępne są dane sekwencyjne w~formacie FASTA z~adnotacjami czasowymi umożliwiającymi podział na okresy. Problem predykcji sformułowano jako klasyfikację binarną --- dla każdego regionu epitopowego w~danym kroku czasowym model przewiduje, czy nastąpi mutacja (zmiana dominującego aminokwasu), czy też sekwencja pozostanie niezmieniona. Ewaluację przeprowadzono na danych historycznych: dla wirusa SARS-CoV-2 obejmujących okres od początku 2020~roku do końca 2022~roku, natomiast dla wirusa Influenza~A wykorzystano dane wieloletnie zgromadzone w~bazie NCBI. Praca nie obejmuje predykcji konkretnych substytucji aminokwasowych (tzn.~przewidywania, który aminokwas zastąpi dotychczasowy), modelowania trójwymiarowej struktury białek ani analizy wpływu przewidywanych mutacji na właściwości funkcjonalne wirusa.
